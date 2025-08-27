@@ -1,11 +1,10 @@
+// src/components/APIWizard/APIWizard.tsx
 import React, { useState } from 'react';
 import {
-  Dialog,
   DialogStep,
   MultistepDialog,
   Button,
-  Intent,
-  Classes
+  Intent
 } from '@blueprintjs/core';
 import { APIEndpointConfig } from '../../types/schema.types';
 import DataSourceStep from './steps/DataSourceStep';
@@ -17,7 +16,6 @@ import AuthenticationStep from './steps/AuthenticationStep';
 import TestingStep from './steps/TestingStep';
 import DeploymentStep from './steps/DeploymentStep';
 import { supabase } from '../../lib/supabase';
-import './APIWizard.css';
 
 interface APIWizardProps {
   isOpen: boolean;
@@ -67,7 +65,6 @@ export const APIWizard: React.FC<APIWizardProps> = ({
     ...existingEndpoint
   });
 
-  const [currentStep, setCurrentStep] = useState(0);
   const [isDeploying, setIsDeploying] = useState(false);
 
   const updateConfig = (updates: Partial<APIEndpointConfig>) => {
@@ -121,12 +118,8 @@ export const APIWizard: React.FC<APIWizardProps> = ({
           .insert(sourceRelations);
       }
 
-      // Deploy edge function
-      await supabase.functions.invoke('deploy-api-endpoint', {
-        body: { endpoint_id: data.id }
-      });
-
       onComplete(data);
+      onClose();
     } catch (error) {
       console.error('Failed to deploy endpoint:', error);
     } finally {
@@ -134,6 +127,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
     }
   };
 
+  // Define steps as DialogStep array
   const steps: DialogStep[] = [
     {
       id: 'datasource',
@@ -153,8 +147,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
           config={config}
           onUpdate={updateConfig}
         />
-      ),
-      disabled: config.dataSources.length < 2
+      )
     },
     {
       id: 'schema',
@@ -224,6 +217,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title={mode === 'create' ? 'Create API Endpoint' : 'Edit API Endpoint'}
+      steps={steps}  // Pass steps as a prop, not as children
       navigationPosition="left"
       showCloseButtonInFooter={false}
       canEscapeKeyClose={false}
@@ -235,8 +229,6 @@ export const APIWizard: React.FC<APIWizardProps> = ({
         loading: isDeploying,
         onClick: handleDeploy
       }}
-    >
-      {steps}
-    </MultistepDialog>
+    />
   );
 };

@@ -1,3 +1,4 @@
+// src/App.tsx (Correct version for API Builder)
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { 
@@ -10,6 +11,8 @@ import {
 } from '@blueprintjs/core';
 import { supabase } from './lib/supabase';
 import { useAuth } from './hooks/useAuth';
+import LoginForm from './components/LoginForm';
+import AuthCallback from './components/AuthCallback';
 import Dashboard from './pages/Dashboard';
 import EndpointsGrid from './pages/EndpointsGrid';
 import Analytics from './pages/Analytics';
@@ -18,7 +21,7 @@ import { APIWizard } from './components/APIWizard/APIWizard';
 import './styles/global.css';
 
 const App: React.FC = () => {
-  const { user, loading, signIn, signOut } = useAuth();
+  const { user, loading, signOut } = useAuth();
   const [currentView, setCurrentView] = useState<'dashboard' | 'endpoints' | 'analytics' | 'docs'>('dashboard');
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardMode, setWizardMode] = useState<'create' | 'edit'>('create');
@@ -45,22 +48,7 @@ const App: React.FC = () => {
   }
 
   if (!user) {
-    return (
-      <div className="auth-container">
-        <div className="auth-card">
-          <h1>API Endpoint Builder</h1>
-          <p>Sign in to create and manage your API endpoints</p>
-          <Button 
-            large 
-            intent={Intent.PRIMARY} 
-            onClick={signIn}
-            icon="log-in"
-          >
-            Sign In with Supabase
-          </Button>
-        </div>
-      </div>
-    );
+    return <LoginForm />;
   }
 
   return (
@@ -128,6 +116,7 @@ const App: React.FC = () => {
 
         <div className="main-content">
           <Routes>
+            <Route path="/auth/callback" element={<AuthCallback />} />
             <Route path="/" element={
               currentView === 'dashboard' ? 
                 <Dashboard onCreateEndpoint={handleCreateEndpoint} /> :

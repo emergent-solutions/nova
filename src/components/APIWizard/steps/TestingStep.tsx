@@ -17,7 +17,7 @@ import {
 } from '@blueprintjs/core';
 import { APIEndpointConfig } from '../../../types/schema.types';
 import { supabase } from '../../../lib/supabase';
-import JSONTree from 'react-json-tree';
+import { JSONTree } from 'react-json-tree';
 
 interface TestingStepProps {
   config: APIEndpointConfig;
