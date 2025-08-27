@@ -1,0 +1,107 @@
+
+/* Drag handle appearance */
+.ag-theme-alpine .ag-row-drag {
+  cursor: grab !important;
+  padding: 0 6px !important;
+  opacity: 0.4 !important;
+  transition: opacity 0.2s ease !important;
+  color: #666 !important;
+}
+
+.ag-theme-alpine .ag-row:hover .ag-row-drag {
+  opacity: 0.8 !important;
+}
+
+.ag-theme-alpine .ag-row-drag:active {
+  cursor: grabbing !important;
+  opacity: 1 !important;
+}
+
+/* Dragging ghost element */
+.ag-theme-alpine .ag-dnd-ghost {
+  background: rgba(33, 150, 243, 0.95) !important;
+  border: 1px solid #1976d2 !important;
+  border-radius: 6px !important;
+  padding: 8px 16px !important;
+  font-size: 14px !important;
+  color: white !important;
+  font-weight: 500 !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25) !important;
+  white-space: nowrap !important;
+  max-width: 400px !important;
+  min-width: 120px !important;
+  text-align: center !important;
+  z-index: 10000 !important;
+  pointer-events: none !important;
+}
+
+/* Rows being dragged */
+.ag-theme-alpine .ag-row.ag-row-dragging {
+  opacity: 0.6 !important;
+  background-color: rgba(33, 150, 243, 0.1) !important;
+}
+
+/* Drop indicator line (for rowDragManaged=true) */
+.ag-theme-alpine .ag-row-drag-line {
+  height: 2px !important;
+  background: #2196f3 !important;
+  border-radius: 1px !important;
+  margin: 0 16px !important;
+  opacity: 0.8 !important;
+  z-index: 1000 !important;
+  position: relative !important;
+}
+
+.ag-theme-alpine .ag-row-drag-line::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: -4px;
+  width: 8px;
+  height: 8px;
+  background: #2196f3;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+
+/* Custom drag indicator (for rowDragManaged=false) */
+.custom-drag-indicator {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: #2196f3;
+  pointer-events: none;
+  z-index: 1000;
+}
+
+.custom-drag-indicator::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: -4px;
+  width: 8px;
+  height: 8px;
+  background: #2196f3;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+/* Visual feedback during drag */
+.ag-theme-alpine .ag-row-drag-active {
+  position: relative;
+}
+
+.ag-theme-alpine .ag-row-drag-active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: #2196f3;
+  z-index: 1000;
+}

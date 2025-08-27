@@ -1,0 +1,439 @@
+.api-wizard-dialog .bp5-dialog-body {
+    padding: 0;
+  }
+  
+  .datasource-step,
+  .relationships-step,
+  .schema-design-step,
+  .output-format-step,
+  .transformation-step,
+  .authentication-step,
+  .testing-step,
+  .deployment-step {
+    padding: 24px;
+    height: 100%;
+    overflow-y: auto;
+  }
+  
+  /* Data Source Step */
+  .sources-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-top: 24px;
+  }
+  
+  .source-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  
+  .source-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  
+  .source-card:hover {
+    transform: translateY(-2px);
+  }
+  
+  .source-card.selected {
+    background: #e1f0fe;
+    border-color: #48aff0;
+  }
+  
+  .source-info {
+    flex: 1;
+  }
+  
+  .source-order {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #137cbd;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+  }
+  
+  /* Relationships Step */
+  .relationships-list {
+    margin-top: 24px;
+  }
+  
+  .relationship-card {
+    margin-bottom: 16px;
+  }
+  
+  .relationship-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  
+  .relationship-sources {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 24px;
+    align-items: center;
+  }
+  
+  .relationship-link-icon {
+    margin-top: 24px;
+    color: #5c7080;
+  }
+  
+  .relationship-options {
+    margin-top: 24px;
+    padding-top: 24px;
+    border-top: 1px solid #e1e8ed;
+  }
+  
+  /* Schema Design Step */
+  .schema-content {
+    margin-top: 24px;
+  }
+  
+  .auto-schema-preview {
+    padding: 24px;
+  }
+  
+  .custom-schema-designer {
+    height: 600px;
+  }
+  
+  /* Output Format Step */
+  .format-selector {
+    margin-top: 24px;
+  }
+  
+  .format-options-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    margin-top: 16px;
+  }
+  
+  .format-card {
+    padding: 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  
+  .format-card:hover {
+    transform: translateY(-2px);
+  }
+  
+  .format-card.selected {
+    background: #e1f0fe;
+    border: 2px solid #137cbd;
+  }
+  
+  .format-card h5 {
+    margin: 12px 0 8px;
+  }
+  
+  .format-card p {
+    margin: 0 0 8px;
+    color: #394b59;
+  }
+  
+  .format-card small {
+    color: #5c7080;
+    font-size: 11px;
+  }
+  
+  .format-settings {
+    margin-top: 24px;
+  }
+  
+  /* Transformation Step */
+  .transformations-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-top: 24px;
+  }
+  
+  .list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  
+  .pipeline-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  
+  .transform-item {
+    cursor: pointer;
+  }
+  
+  .transform-item.selected {
+    border-color: #137cbd;
+    background: #f5f8fa;
+  }
+  
+  .transform-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  
+  .transform-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  
+  .field-mapping {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  
+  .transform-actions {
+    display: flex;
+    gap: 8px;
+  }
+  
+  .transform-config-preview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  
+  .transformation-editor {
+    position: sticky;
+    top: 0;
+  }
+  
+  .editor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  
+  .editor-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 24px;
+  }
+  
+  /* Authentication Step */
+  .auth-section,
+  .rate-limit-section,
+  .cache-section,
+  .ip-section,
+  .cors-section {
+    margin-bottom: 24px;
+  }
+  
+  .auth-config,
+  .rate-limit-config,
+  .cache-config,
+  .cors-config {
+    margin-top: 16px;
+  }
+  
+  .auth-options {
+    margin-top: 16px;
+    padding: 16px;
+    background: #f5f8fa;
+    border-radius: 4px;
+  }
+  
+  .invalidation-triggers {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  
+  /* Testing Step */
+  .test-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-top: 24px;
+  }
+  
+  .test-config,
+  .test-results {
+    height: fit-content;
+  }
+  
+  .query-params {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .param-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 8px;
+  }
+  
+  .loading-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px;
+    text-align: center;
+  }
+  
+  .result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #e1e8ed;
+  }
+  
+  .result-status {
+    display: flex;
+    gap: 8px;
+  }
+  
+  .result-metrics {
+    display: flex;
+    gap: 16px;
+  }
+  
+  .metric {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: #5c7080;
+  }
+  
+  .response-content {
+    padding: 16px;
+    background: #f5f8fa;
+    border-radius: 4px;
+  }
+  
+  .raw-response,
+  .curl-command {
+    padding: 16px;
+    background: #2b2b2b;
+    color: #f8f8f2;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Courier New', monospace;
+    font-size: 12px;
+    overflow-x: auto;
+  }
+  
+  /* Deployment Step */
+  .deployment-config {
+    margin-bottom: 24px;
+  }
+  
+  .config-summary {
+    margin-bottom: 24px;
+  }
+  
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-top: 16px;
+  }
+  
+  .summary-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: #f5f8fa;
+    border-radius: 4px;
+  }
+  
+  .validation-results {
+    margin-bottom: 24px;
+  }
+  
+  .validation-errors,
+  .validation-warnings {
+    margin-top: 16px;
+  }
+  
+  .validation-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    margin: 4px 0;
+    border-radius: 4px;
+  }
+  
+  .validation-item.error {
+    background: #fef5f5;
+  }
+  
+  .validation-item.warning {
+    background: #fef9f3;
+  }
+  
+  .deployment-progress {
+    margin-bottom: 24px;
+  }
+  
+  .deployment-status {
+    margin-top: 12px;
+    text-align: center;
+    color: #5c7080;
+  }
+  
+  .deployment-success {
+    margin-bottom: 24px;
+  }
+  
+  .endpoint-url {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+    padding: 12px;
+    background: #f5f8fa;
+    border-radius: 4px;
+  }
+  
+  .endpoint-url code {
+    flex: 1;
+    font-size: 14px;
+  }
+  
+  .post-deployment-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+  }
+  
+  .deployment-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 24px;
+  }

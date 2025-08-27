@@ -1,0 +1,175 @@
+.schema-mapper {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    position: relative;
+  }
+  
+  .mapper-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px;
+    border-bottom: 1px solid #e1e8ed;
+  }
+  
+  .mapper-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    padding: 16px;
+    flex: 1;
+    position: relative;
+  }
+  
+  .source-panel,
+  .target-panel {
+    height: 500px;
+    overflow-y: auto;
+  }
+  
+  .panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    border-bottom: 1px solid #e1e8ed;
+    position: sticky;
+    top: 0;
+    background: white;
+    z-index: 2;
+  }
+  
+  .source-group {
+    padding: 12px;
+    border-bottom: 1px solid #f5f8fa;
+  }
+  
+  .source-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #5c7080;
+  }
+  
+  .fields-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  
+  .field-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 4px;
+    cursor: move;
+    transition: all 0.2s;
+  }
+  
+  .field-item:hover {
+    background: #f5f8fa;
+  }
+  
+  .field-item.mapped {
+    background: #d3f0e0;
+  }
+  
+  .field-item.dragging {
+    opacity: 0.5;
+  }
+  
+  .drag-handle {
+    color: #a7b6c2;
+    cursor: move;
+  }
+  
+  .field-name {
+    flex: 1;
+    font-family: monospace;
+    font-size: 13px;
+  }
+  
+  .mapped-icon {
+    color: #0f9960;
+  }
+  
+  .schema-node {
+    user-select: none;
+  }
+  
+  .node-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  
+  .node-content:hover {
+    background: #f5f8fa;
+  }
+  
+  .node-content.selected {
+    background: #e1f0fe;
+    border: 1px solid #48aff0;
+  }
+  
+  .node-content.mapped {
+    background: #d3f0e0;
+  }
+  
+  .node-name {
+    flex: 1;
+    font-weight: 500;
+  }
+  
+  .mapping-info {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  
+  .node-children {
+    margin-left: 20px;
+  }
+  
+  .field-config-panel {
+    position: absolute;
+    right: 16px;
+    top: 80px;
+    width: 400px;
+    max-height: 600px;
+    overflow-y: auto;
+    z-index: 10;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  }
+  
+  .preview-panel {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    width: 400px;
+    max-height: 400px;
+    z-index: 10;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  }
+  
+  .preview-json {
+    padding: 12px;
+    margin: 0;
+    background: #f5f8fa;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: monospace;
+    overflow-x: auto;
+  }
+  
+  .connection-svg {
+    pointer-events: none;
+  }
