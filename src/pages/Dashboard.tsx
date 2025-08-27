@@ -101,7 +101,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onCreateEndpoint }) => {
       {/* Hero Section */}
       <div className="dashboard-hero">
         <div className="hero-content">
-          <H1>Welcome to API Builder</H1>
+          <h1>Welcome to Emergent Nova</h1>
           <p>Create powerful API endpoints from your data sources</p>
           <Button
             large

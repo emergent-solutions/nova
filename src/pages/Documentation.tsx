@@ -8,7 +8,7 @@ const Documentation: React.FC = () => {
       
       <Card elevation={Elevation.ONE} style={{ marginBottom: '24px' }}>
         <h2>Getting Started</h2>
-        <p>Welcome to the API Builder documentation. This guide will help you create and manage API endpoints.</p>
+        <p>Welcome to the Emergent Nova documentation. This guide will help you create and manage API endpoints.</p>
         
         <h3>Quick Start</h3>
         <ol>

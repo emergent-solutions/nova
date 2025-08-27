@@ -1,4 +1,3 @@
-// src/App.tsx (Correct version for API Builder)
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { 
@@ -57,7 +56,7 @@ const App: React.FC = () => {
         <Navbar className="bp5-dark">
           <Navbar.Group align={Alignment.LEFT}>
             <Navbar.Heading>
-              <strong>API Builder</strong>
+              <strong>Emergent Nova</strong>
             </Navbar.Heading>
             <Navbar.Divider />
             
