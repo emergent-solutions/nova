@@ -124,6 +124,21 @@ export const APIWizard: React.FC<APIWizardProps> = ({
     }
   }, [isOpen]);
 
+  // Create a computed value for all data sources
+  const allDataSources = React.useMemo(() => {
+    const selectedExisting = existingDataSources.filter(ds => 
+      selectedDataSources.includes(ds.id)
+    );
+    const validNew = newDataSources.filter(ds => ds.name && ds.type);
+    
+    return [...selectedExisting, ...validNew];
+  }, [existingDataSources, selectedDataSources, newDataSources]);
+  
+  // Update the config whenever allDataSources changes
+  useEffect(() => {
+    updateConfig({ dataSources: allDataSources });
+  }, [allDataSources]);
+
   const loadExistingDataSources = async () => {
     try {
       const { data, error } = await supabase
@@ -295,7 +310,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
       showCloseButtonInFooter={false}
       canEscapeKeyClose={false}
       canOutsideClickClose={false}
-      className="api-wizard-dialog"
+      className="api-wizard-dialog wide-multistep-dialog"
       currentStepId={currentStepId}
       onChange={(newStepId) => setCurrentStepId(newStepId)}
       nextButtonProps={{
@@ -407,7 +422,10 @@ export const APIWizard: React.FC<APIWizardProps> = ({
         title="Output Format"
         panel={
           <OutputFormatStep
-            config={config}
+            config={{
+              ...config,
+              dataSources: allDataSources // Ensure it has the latest
+            }}
             onUpdate={updateConfig}
           />
         }

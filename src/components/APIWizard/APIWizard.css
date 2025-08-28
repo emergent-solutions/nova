@@ -460,3 +460,14 @@
   gap: 12px;
   margin-top: 24px;
 }
+
+/* Make the MultistepDialog 80% width */
+.wide-multistep-dialog .bp5-dialog {
+  width: 80vw !important;
+  max-width: 1920px !important;
+  height: 80vh !important;
+}
+
+.wide-multistep-dialog .bp5-multistep-dialog-panels {
+  height: calc(100% - 120px) !important;
+}

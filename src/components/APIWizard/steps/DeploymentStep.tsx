@@ -70,6 +70,16 @@ const DeploymentStep: React.FC<DeploymentStepProps> = ({
       if (!metadata?.titleField) warnings.push('RSS item title field not mapped');
     }
 
+    // ATOM specific validation
+    if (config.outputFormat === 'atom') {
+      const metadata = config.outputSchema?.metadata;
+      if (!metadata?.feedId) errors.push('ATOM feed ID is required');
+      if (!metadata?.feedTitle) errors.push('ATOM feed title is required');
+      if (!metadata?.idField) errors.push('ATOM entry ID field must be mapped');
+      if (!metadata?.titleField) warnings.push('ATOM entry title field not mapped');
+      if (!metadata?.summaryField) warnings.push('ATOM entry summary field not mapped');
+    }
+
     // Schema validation
     if (!config.outputSchema?.root) {
       warnings.push('Output schema not defined - using auto-generated schema');

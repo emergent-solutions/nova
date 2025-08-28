@@ -41,7 +41,7 @@ export interface FieldMapping {
   export interface OutputSchema {
     root: SchemaNode;
     version: string;
-    format: 'json' | 'xml' | 'rss' | 'csv';
+    format: 'json' | 'xml' | 'rss' | 'atom' | 'csv';
     metadata?: Record<string, any>;
   }
   
@@ -67,7 +67,7 @@ export interface FieldMapping {
     slug?: string;
     dataSources: DataSource[];
     relationships: DataRelationship[];
-    outputFormat: 'json' | 'xml' | 'rss' | 'csv';
+    outputFormat: 'json' | 'xml' | 'rss' | 'atom' | 'csv';
     outputSchema: OutputSchema;
     fieldMappings: FieldMapping[];
     transformations: Transformation[];
