@@ -46,19 +46,51 @@ const TestingStep: React.FC<TestingStepProps> = ({ config, onUpdate }) => {
     { key: '', value: '' }
   ]);
 
+  const getEndpointUrl = () => {
+    // Use the actual app URL and the endpoint slug
+    const baseUrl = import.meta.env.VITE_API_URL || window.location.origin;
+    const slug = config.slug || 'endpoint';
+    return `${baseUrl}/api/${slug}`;
+  };
+
   const runTest = async () => {
     setIsLoading(true);
     const startTime = Date.now();
     
     try {
+      // Clean the config to remove sample_response
+      const cleanConfig = JSON.parse(
+        JSON.stringify(config, (key, value) => {
+          if (key === 'sample_response') return undefined;
+          return value;
+        })
+      );
+
+      // Parse the test body if it exists
+      let parsedBody = undefined;
+      if (testBody && testMethod !== 'GET' && testMethod !== 'DELETE') {
+        try {
+          parsedBody = JSON.parse(testBody);
+        } catch (e) {
+          console.error('Invalid JSON in request body:', e);
+          setTestResult({
+            success: false,
+            error: 'Invalid JSON in request body',
+            responseTime: 0
+          });
+          setIsLoading(false);
+          return;
+        }
+      }
+
       // Call the test endpoint function
       const { data, error } = await supabase.functions.invoke('test-api-endpoint', {
         body: {
-          config,
+          config: cleanConfig,
           params: testParams,
           headers: testHeaders,
           method: testMethod,
-          body: testBody ? JSON.parse(testBody) : undefined
+          body: parsedBody
         }
       });
 
@@ -152,16 +184,17 @@ const TestingStep: React.FC<TestingStepProps> = ({ config, onUpdate }) => {
           
           <FormGroup label="Endpoint URL">
             <InputGroup
-              value={`https://your-api.com/api/${config.slug || 'endpoint'}`}
+              value={getEndpointUrl()}
               readOnly
               rightElement={
                 <Button 
                   minimal 
                   icon="duplicate"
+                  title="Copy to clipboard"
                   onClick={() => {
-                    navigator.clipboard.writeText(
-                      `https://your-api.com/api/${config.slug || 'endpoint'}`
-                    );
+                    navigator.clipboard.writeText(getEndpointUrl());
+                    // Optional: show a toast notification
+                    // AppToaster.show({ message: "URL copied!", intent: "success" });
                   }}
                 />
               }

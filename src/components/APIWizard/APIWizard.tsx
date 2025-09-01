@@ -205,6 +205,17 @@ export const APIWizard: React.FC<APIWizardProps> = ({
   const handleDeploy = async () => {
     try {
       setIsDeploying(true);
+
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      console.log('User check:', { 
+        hasUser: !!user, 
+        userId: user?.id,
+        userError 
+      });
+      
+      if (!user) {
+        throw new Error('No authenticated user');
+      }
       
       // First, save any new data sources
       const createdDataSourceIds: string[] = [];
@@ -219,7 +230,8 @@ export const APIWizard: React.FC<APIWizardProps> = ({
               active: true,
               api_config: newDs.api_config,
               database_config: newDs.database_config,
-              file_config: newDs.file_config
+              file_config: newDs.file_config,
+              user_id: user.id
             })
             .select()
             .single();
@@ -256,7 +268,8 @@ export const APIWizard: React.FC<APIWizardProps> = ({
           auth_config: config.authentication,
           cache_config: config.caching,
           rate_limit_config: config.rateLimiting,
-          active: true
+          active: true,
+          user_id: user.id
         })
         .select()
         .single();

@@ -15,10 +15,58 @@ import {
   Toaster, 
   Position, 
   NonIdealState, 
-  Tag
+  Tag,
+  RadioGroup,
+  Radio,
+  Classes
 } from '@blueprintjs/core';
 import { APIEndpointConfig } from '../../../types/schema.types';
+import { DataSource } from '../../../types/datasource.types';
 import { useFetchProxy } from '../../../hooks/useFetchProxy';
+import { JsonPathExplorer } from '../../JsonPathExplorer/JsonPathExplorer';
+
+// Helper to extract field paths
+function extractFieldPaths(obj: any, prefix = ''): Array<{ path: string; display: string }> {
+  const fields: Array<{ path: string; display: string }> = [];
+  
+  if (!obj || typeof obj !== 'object') return fields;
+  
+  Object.keys(obj).forEach(key => {
+    const path = prefix ? `${prefix}.${key}` : key;
+    const value = obj[key];
+    const valuePreview = typeof value === 'string' 
+      ? `"${value.substring(0, 30)}${value.length > 30 ? '...' : ''}"`
+      : typeof value === 'number' || typeof value === 'boolean' 
+      ? String(value)
+      : Array.isArray(value) 
+      ? `[${value.length} items]`
+      : typeof value === 'object' && value !== null
+      ? '{...}'
+      : 'null';
+    
+    fields.push({ 
+      path, 
+      display: `${key} (${valuePreview})`
+    });
+    
+    // Recurse for nested objects (but not arrays)
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      fields.push(...extractFieldPaths(value, path));
+    }
+  });
+  
+  return fields;
+}
+
+const getDefaultChannelLink = () => {
+  // Option 1: Use current application URL
+  if (typeof window !== 'undefined') {
+    return window.location.origin;
+  }
+  
+  // Option 2: Use a configured base URL
+  return import.meta.env.VITE_APP_URL || 'https://your-app.com';
+};
 
 const AppToaster = Toaster.create({
   position: Position.TOP,
@@ -28,6 +76,219 @@ interface OutputFormatStepProps {
   config: APIEndpointConfig;
   onUpdate: (updates: Partial<APIEndpointConfig>) => void;
 }
+
+const JsonPathSelector: React.FC<{
+  data: any;
+  onSelectItemsPath: (path: string) => void;
+  selectedItemsPath: string;
+}> = ({ data, onSelectItemsPath, selectedItemsPath }) => {
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+
+  const findArrayPaths = (obj: any, currentPath = ''): Array<{ path: string; count: number }> => {
+    const arrayPaths: Array<{ path: string; count: number }> = [];
+    
+    if (!obj || typeof obj !== 'object') return arrayPaths;
+    
+    Object.keys(obj).forEach(key => {
+      const path = currentPath ? `${currentPath}.${key}` : key;
+      const value = obj[key];
+      
+      if (Array.isArray(value)) {
+        arrayPaths.push({ path, count: value.length });
+        // Don't recurse into arrays - we want the array itself, not its contents
+      } else if (typeof value === 'object' && value !== null) {
+        // Recurse into objects
+        arrayPaths.push(...findArrayPaths(value, path));
+      }
+    });
+    
+    return arrayPaths;
+  };
+
+  const arrayPaths = findArrayPaths(data);
+
+  return (
+    <FormGroup label="Select the array containing RSS items" labelInfo="(required)">
+      <RadioGroup
+        onChange={(e) => onSelectItemsPath(e.currentTarget.value)}
+        selectedValue={selectedItemsPath}
+      >
+        {arrayPaths.length === 0 ? (
+          <Callout intent="warning">
+            No arrays found in the data structure. Make sure your API returns an array of items.
+          </Callout>
+        ) : (
+          arrayPaths.map(({ path, count }) => (
+            <Radio 
+              key={path} 
+              value={path}
+              label={
+                <span>
+                  <code>{path}</code> 
+                  <Tag minimal intent={Intent.PRIMARY} style={{ marginLeft: 8 }}>
+                    {count} items
+                  </Tag>
+                </span>
+              }
+            />
+          ))
+        )}
+      </RadioGroup>
+      
+      {selectedItemsPath && arrayPaths.length > 0 && (
+        <Callout intent="success" icon="tick" style={{ marginTop: 10 }}>
+          RSS items will be generated from the <strong>{
+            arrayPaths.find(a => a.path === selectedItemsPath)?.count || 0
+          }</strong> items in <code>{selectedItemsPath}</code>
+        </Callout>
+      )}
+    </FormGroup>
+  );
+};
+
+const FieldSelector: React.FC<{
+  sourcePath: string;
+  sampleData: any;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}> = ({ sourcePath, sampleData, value, onChange, placeholder }) => {
+  // Get sample item from the selected path
+  const getSampleItem = () => {
+    const parts = sourcePath.split('.');
+    let current = sampleData;
+    
+    for (const part of parts) {
+      current = current?.[part];
+    }
+    
+    return Array.isArray(current) && current.length > 0 ? current[0] : null;
+  };
+
+  const sampleItem = getSampleItem();
+  const availableFields = sampleItem ? extractFieldPaths(sampleItem) : [];
+
+  return (
+    <HTMLSelect
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      fill
+    >
+      <option value="">{placeholder || "Select field..."}</option>
+      <optgroup label="Simple Fields">
+        {availableFields
+          .filter(f => !f.path.includes('.'))
+          .map(field => (
+            <option key={field.path} value={field.path}>
+              {field.display}
+            </option>
+          ))}
+      </optgroup>
+      {availableFields.some(f => f.path.includes('.')) && (
+        <optgroup label="Nested Fields">
+          {availableFields
+            .filter(f => f.path.includes('.'))
+            .map(field => (
+              <option key={field.path} value={field.path}>
+                {field.display}
+              </option>
+            ))}
+        </optgroup>
+      )}
+    </HTMLSelect>
+  );
+};
+
+const RssMappingPreview: React.FC<{
+  sampleData: any;
+  itemsPath: string;
+  fieldMappings: {
+    title?: string;
+    description?: string;
+    link?: string;
+    pubDate?: string;
+    guid?: string;
+    author?: string;
+    category?: string;
+  };
+  channelInfo: {  // Add this prop type
+    title: string;
+    description: string;
+    link: string;
+  };
+}> = ({ sampleData, itemsPath, fieldMappings, channelInfo }) => {  // Add channelInfo to props
+  // Helper function to get value from a path like "data.items" or "author.name"
+  const getValueFromPath = (obj: any, path: string): any => {
+    if (!path || !obj) return null;
+    
+    const parts = path.split('.');
+    let current = obj;
+    
+    for (const part of parts) {
+      if (current === null || current === undefined) return null;
+      current = current[part];
+    }
+    
+    return current;
+  };
+
+  // Get the items array from the sample data
+  const items = getValueFromPath(sampleData, itemsPath);
+  
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return (
+      <Callout intent="warning" icon="warning-sign" style={{ marginTop: 20 }}>
+        No items found at path: <code>{itemsPath}</code>
+      </Callout>
+    );
+  }
+
+  // Get the first item as a sample
+  const sampleItem = items[0];
+  
+  // Get field values
+  const getFieldValue = (fieldPath?: string): string => {
+    if (!fieldPath) return '[Not mapped]';
+    const value = getValueFromPath(sampleItem, fieldPath);
+    if (value === null || value === undefined) return '[No value]';
+    if (typeof value === 'object') return '[Object]';
+    if (Array.isArray(value)) return value.join(', ');
+    return String(value);
+  };
+
+  return (
+    <div style={{ marginTop: 20 }}>
+      <h5>RSS Feed Preview</h5>
+      <Card style={{ backgroundColor: '#f5f8fa', padding: 15, fontFamily: 'monospace', fontSize: 12 }}>
+        <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+{`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>${channelInfo.title || '[Channel Title]'}</title>
+    <description>${channelInfo.description || '[Channel Description]'}</description>
+    <link>${channelInfo.link || '[Channel Link]'}</link>
+    
+    <!-- First item from ${items.length} total items -->
+    <item>
+      <title>${getFieldValue(fieldMappings.title)}</title>
+      <description>${getFieldValue(fieldMappings.description)}</description>
+      <link>${getFieldValue(fieldMappings.link)}</link>${fieldMappings.pubDate ? `
+      <pubDate>${getFieldValue(fieldMappings.pubDate)}</pubDate>` : ''}${fieldMappings.guid ? `
+      <guid>${getFieldValue(fieldMappings.guid)}</guid>` : ''}${fieldMappings.author ? `
+      <author>${getFieldValue(fieldMappings.author)}</author>` : ''}${fieldMappings.category ? `
+      <category>${getFieldValue(fieldMappings.category)}</category>` : ''}
+    </item>
+  </channel>
+</rss>`}
+        </pre>
+      </Card>
+      
+      <Callout intent="success" icon="tick" style={{ marginTop: 10 }}>
+        This preview shows the first item from {items.length} total items found at <code>{itemsPath}</code>
+      </Callout>
+    </div>
+  );
+};
 
 const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate }) => {
   console.log('OutputFormatStep - config:', config);
@@ -43,9 +304,14 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
     prettyPrint: true,
     includeMetadata: true,
     rootWrapper: 'data',
+    channelLink: getDefaultChannelLink(),
     ...config.outputSchema?.metadata
   });
-
+  const [selectedDataSource, setSelectedDataSource] = useState<string>(
+    formatOptions.sourceId || ''
+  );
+  const [sampleData, setSampleData] = useState<Record<string, any>>({});
+  
   const { fetchViaProxy } = useFetchProxy();
 
   // Function to test a data source and discover its fields
@@ -56,7 +322,49 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
       let fields: string[] = [];
       
       if (source.type === 'api') {
-        const apiConfig = source.config as APIDataSourceConfig;
+        // Handle different possible structures for API config
+        let apiConfig: any = null;
+        
+        // Check different possible locations for API configuration
+        if (source.config && typeof source.config === 'object') {
+          // If config is an object, it might be the API config directly
+          if ('url' in source.config) {
+            apiConfig = source.config;
+          }
+          // Or it might be nested under api_config
+          else if ('api_config' in source.config && source.config.api_config) {
+            apiConfig = source.config.api_config;
+          }
+        }
+        // Check if api_config is at root level
+        else if ('api_config' in source && source.api_config) {
+          apiConfig = source.api_config;
+        }
+        // Check if URL is at root level (legacy structure)
+        else if ('url' in source) {
+          apiConfig = {
+            url: source.url,
+            method: source.method || 'GET',
+            headers: source.headers || {}
+          };
+        }
+        
+        // Debug log to see the structure
+        console.log('Data source structure:', {
+          id: source.id,
+          type: source.type,
+          config: source.config,
+          api_config: source.api_config,
+          url: source.url
+        });
+        
+        if (!apiConfig || !apiConfig.url) {
+          AppToaster.show({
+            message: `API URL not found for ${source.name}. Please check the data source configuration.`,
+            intent: 'warning'
+          });
+          return;
+        }
         
         try {
           // Use fetchViaProxy for the API request
@@ -68,6 +376,11 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
           
           // The data from fetchViaProxy is in result.data
           let data = result.data;
+
+          setSampleData(prev => ({
+            ...prev,
+            [source.id]: data // Store the full response data
+          }));
           
           // Parse JSON if it's a string
           if (typeof data === 'string') {
@@ -85,13 +398,14 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
           
           // Navigate to the data path if specified
           let targetData = data;
-          if (apiConfig.data_path) {
-            const pathParts = apiConfig.data_path.split('.');
+          const dataPath = apiConfig.data_path || apiConfig.dataPath;
+          if (dataPath) {
+            const pathParts = dataPath.split('.');
             for (const part of pathParts) {
               if (targetData && typeof targetData === 'object' && part in targetData) {
                 targetData = targetData[part];
               } else {
-                console.warn(`Data path "${apiConfig.data_path}" not found in response`);
+                console.warn(`Data path "${dataPath}" not found in response`);
                 break;
               }
             }
@@ -126,7 +440,7 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
         }
         
       } else if (source.type === 'database') {
-        // For database sources, you might need a different endpoint
+        // Handle database sources...
         AppToaster.show({
           message: 'Database field discovery requires the data source to be synced first',
           intent: 'warning'
@@ -134,11 +448,8 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
         return;
         
       } else if (source.type === 'file') {
-        // For file sources, check if fields are already stored
-        const fileConfig = source.config as any;
-        if (fileConfig.headers && fileConfig.headers.length > 0) {
-          fields = fileConfig.headers;
-        } else if (source.fields && source.fields.length > 0) {
+        // Handle file sources...
+        if (source.fields && source.fields.length > 0) {
           fields = source.fields;
         } else {
           AppToaster.show({
@@ -164,14 +475,13 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
         ];
       }
       
+      // Rest of the function remains the same...
       if (fields.length > 0) {
-        // Store discovered fields locally
         setDiscoveredFields(prev => ({
           ...prev,
           [source.id]: fields
         }));
         
-        // Update the data source in config with the discovered fields
         const updatedSources = config.dataSources.map(s => 
           s.id === source.id 
             ? { ...s, fields } 
@@ -179,37 +489,6 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
         );
         
         onUpdate({ dataSources: updatedSources });
-        
-        // Also store sample data if we got any
-        if (source.type === 'api' && !source.sample_data) {
-          const apiConfig = source.config as APIDataSourceConfig;
-          const result = await fetchViaProxy(apiConfig.url, {
-            method: apiConfig.method || 'GET',
-            headers: apiConfig.headers || {},
-            body: apiConfig.body
-          });
-          
-          let sampleData = result.data;
-          if (apiConfig.data_path) {
-            const pathParts = apiConfig.data_path.split('.');
-            for (const part of pathParts) {
-              if (sampleData && typeof sampleData === 'object' && part in sampleData) {
-                sampleData = sampleData[part];
-              }
-            }
-          }
-          
-          // Store up to 5 sample items
-          if (Array.isArray(sampleData)) {
-            const samples = sampleData.slice(0, 5);
-            const updatedWithSamples = config.dataSources.map(s => 
-              s.id === source.id 
-                ? { ...s, fields, sample_data: samples } 
-                : s
-            );
-            onUpdate({ dataSources: updatedWithSamples });
-          }
-        }
         
         AppToaster.show({
           message: `Discovered ${fields.length} fields from ${source.name}`,
@@ -588,99 +867,221 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
 
         {format === 'rss' && (
           <>
-            {/* Add this warning/action if no fields are available */}
-            {getAllFields().length === 0 && (
-              <Callout intent="warning" icon="warning-sign" style={{ marginBottom: 20 }}>
-                No fields detected in your data sources. 
-                {config.dataSources.map(source => (
-                  !source.fields || source.fields.length === 0 ? (
-                    <div key={source.id} style={{ marginTop: 10 }}>
-                      <Button
-                        small
-                        intent="primary"
-                        loading={loadingFields.includes(source.id)}
-                        onClick={() => fetchFieldsForSource(source.id)}
-                        text={`Analyze ${source.name}`}
-                        icon="refresh"
-                      />
+            {/* Channel Configuration */}
+            <Card style={{ marginBottom: 20 }}>
+              <h4>RSS Channel Settings</h4>
+              
+              <FormGroup label="Channel Title" labelInfo="(required)">
+                <InputGroup
+                  value={formatOptions.channelTitle}
+                  onChange={(e) => updateFormatOption('channelTitle', e.target.value)}
+                  placeholder="My API Feed"
+                />
+              </FormGroup>
+
+              <FormGroup label="Channel Description" labelInfo="(required)">
+                <TextArea
+                  value={formatOptions.channelDescription}
+                  onChange={(e) => updateFormatOption('channelDescription', e.target.value)}
+                  placeholder="Description of your feed"
+                  rows={2}
+                />
+              </FormGroup>
+
+              <FormGroup 
+                label="Channel Link" 
+                labelInfo="(auto-generated)"
+                helperText="The homepage URL for this RSS feed"
+              >
+                <InputGroup
+                  value={formatOptions.channelLink || getDefaultChannelLink()}
+                  onChange={(e) => updateFormatOption('channelLink', e.target.value)}
+                  placeholder="https://example.com"
+                  disabled={false} // Set to true if you want it read-only
+                  leftIcon="link"
+                  rightElement={
+                    <Button
+                      minimal
+                      icon="refresh"
+                      title="Reset to default"
+                      onClick={() => updateFormatOption('channelLink', getDefaultChannelLink())}
+                    />
+                  }
+                />
+              </FormGroup>
+            </Card>
+
+            {/* Data Source Selection and Field Discovery */}
+            <Card style={{ marginBottom: 20 }}>
+              <h4>Data Source & Field Mapping</h4>
+              
+              {config.dataSources.length === 0 ? (
+                <Callout intent="warning" icon="warning-sign">
+                  No data sources selected. Please go back and select at least one data source.
+                </Callout>
+              ) : (
+                <>
+                  <FormGroup label="Select Data Source for RSS Items">
+                    <HTMLSelect
+                      value={selectedDataSource || ''}
+                      onChange={(e) => {
+                        setSelectedDataSource(e.target.value);
+                        // Reset field mappings when changing source
+                        updateFormatOption('sourceId', e.target.value);
+                        updateFormatOption('itemsPath', '');
+                        updateFormatOption('fieldMappings', {});
+                      }}
+                      fill
+                    >
+                      <option value="">-- Select a data source --</option>
+                      {config.dataSources.map(source => (
+                        <option key={source.id} value={source.id}>
+                          {source.name} ({source.type})
+                        </option>
+                      ))}
+                    </HTMLSelect>
+                  </FormGroup>
+
+                  {selectedDataSource && (
+                    <div style={{ marginTop: 15 }}>
+                      {!discoveredFields[selectedDataSource] ? (
+                        <Callout intent="warning" icon="info-sign">
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                              <strong>Field discovery needed</strong>
+                              <p style={{ margin: 0 }}>Click analyze to discover available fields in this data source.</p>
+                            </div>
+                            <Button
+                              intent="primary"
+                              loading={testingSource === selectedDataSource}
+                              onClick={() => testAndDiscoverFields(
+                                config.dataSources.find(s => s.id === selectedDataSource)!
+                              )}
+                              icon="search"
+                              text="Analyze"
+                            />
+                          </div>
+                        </Callout>
+                      ) : (
+                        <>
+                          {/* Show sample data structure if available */}
+                          {sampleData[selectedDataSource] && (
+                            <JsonPathSelector
+                              data={sampleData[selectedDataSource]}
+                              onSelectItemsPath={(path) => updateFormatOption('itemsPath', path)}
+                              selectedItemsPath={formatOptions.itemsPath || ''}
+                            />
+                          )}
+                        </>
+                      )}
                     </div>
-                  ) : null
-                ))}
-              </Callout>
+                  )}
+                </>
+              )}
+            </Card>
+
+            {/* Field Mapping */}
+            {selectedDataSource && formatOptions.itemsPath && (
+              <Card style={{ marginBottom: 20 }}>
+                <h4>RSS Field Mapping</h4>
+                <p className={Classes.TEXT_MUTED}>
+                  Map fields from your data to RSS elements. 
+                  Items will be extracted from: <Tag intent="primary">{formatOptions.itemsPath}</Tag>
+                </p>
+
+                <FormGroup label="Title Field" labelInfo="(required)">
+                  <FieldSelector
+                    sourcePath={formatOptions.itemsPath}
+                    sampleData={sampleData[selectedDataSource]}
+                    value={formatOptions.titleField || ''}
+                    onChange={(value) => updateFormatOption('titleField', value)}
+                    placeholder="Select or type field path..."
+                  />
+                </FormGroup>
+
+                <FormGroup label="Description Field" labelInfo="(required)">
+                  <FieldSelector
+                    sourcePath={formatOptions.itemsPath}
+                    sampleData={sampleData[selectedDataSource]}
+                    value={formatOptions.descriptionField || ''}
+                    onChange={(value) => updateFormatOption('descriptionField', value)}
+                    placeholder="Select or type field path..."
+                  />
+                </FormGroup>
+
+                <FormGroup label="Link Field" labelInfo="(required)">
+                  <FieldSelector
+                    sourcePath={formatOptions.itemsPath}
+                    sampleData={sampleData[selectedDataSource]}
+                    value={formatOptions.linkField || ''}
+                    onChange={(value) => updateFormatOption('linkField', value)}
+                    placeholder="Select or type field path..."
+                  />
+                </FormGroup>
+
+                <FormGroup label="Publication Date Field">
+                  <FieldSelector
+                    sourcePath={formatOptions.itemsPath}
+                    sampleData={sampleData[selectedDataSource]}
+                    value={formatOptions.pubDateField || ''}
+                    onChange={(value) => updateFormatOption('pubDateField', value)}
+                    placeholder="Select or type field path..."
+                  />
+                </FormGroup>
+
+                <FormGroup label="GUID Field" helperText="Unique identifier for each item">
+                  <FieldSelector
+                    sourcePath={formatOptions.itemsPath}
+                    sampleData={sampleData[selectedDataSource]}
+                    value={formatOptions.guidField || ''}
+                    onChange={(value) => updateFormatOption('guidField', value)}
+                    placeholder="Select or type field path..."
+                  />
+                </FormGroup>
+
+                <FormGroup label="Author Field">
+                  <FieldSelector
+                    sourcePath={formatOptions.itemsPath}
+                    sampleData={sampleData[selectedDataSource]}
+                    value={formatOptions.authorField || ''}
+                    onChange={(value) => updateFormatOption('authorField', value)}
+                    placeholder="Select or type field path..."
+                  />
+                </FormGroup>
+
+                <FormGroup label="Category Field">
+                  <FieldSelector
+                    sourcePath={formatOptions.itemsPath}
+                    sampleData={sampleData[selectedDataSource]}
+                    value={formatOptions.categoryField || ''}
+                    onChange={(value) => updateFormatOption('categoryField', value)}
+                    placeholder="Select or type field path..."
+                  />
+                </FormGroup>
+
+                {/* Preview Section */}
+                {sampleData[selectedDataSource] && (
+                  <RssMappingPreview
+                    sampleData={sampleData[selectedDataSource]}
+                    itemsPath={formatOptions.itemsPath}
+                    channelInfo={{  // Add this prop
+                      title: formatOptions.channelTitle || '',
+                      description: formatOptions.channelDescription || '',
+                      link: formatOptions.channelLink || ''
+                    }}
+                    fieldMappings={{
+                      title: formatOptions.titleField,
+                      description: formatOptions.descriptionField,
+                      link: formatOptions.linkField,
+                      pubDate: formatOptions.pubDateField,
+                      guid: formatOptions.guidField,
+                      author: formatOptions.authorField,
+                      category: formatOptions.categoryField
+                    }}
+                  />
+                )}
+              </Card>
             )}
-
-            <FormGroup label="Channel Title" labelInfo="(required)">
-              <InputGroup
-                value={formatOptions.channelTitle}
-                onChange={(e) => updateFormatOption('channelTitle', e.target.value)}
-                placeholder="My API Feed"
-              />
-            </FormGroup>
-
-            <FormGroup label="Channel Description" labelInfo="(required)">
-              <TextArea
-                value={formatOptions.channelDescription}
-                onChange={(e) => updateFormatOption('channelDescription', e.target.value)}
-                placeholder="Description of your feed"
-                rows={2}
-              />
-            </FormGroup>
-
-            <FormGroup label="Channel Link">
-              <InputGroup
-                value={formatOptions.channelLink}
-                onChange={(e) => updateFormatOption('channelLink', e.target.value)}
-                placeholder="https://example.com"
-              />
-            </FormGroup>
-
-            <FormGroup label="Title Field">
-              <HTMLSelect
-                value={formatOptions.titleField}
-                onChange={(e) => updateFormatOption('titleField', e.target.value)}
-              >
-                <option value="">Select field...</option>
-                {getAllFields().map(field => (
-                  <option key={field} value={field}>{field}</option>
-                ))}
-              </HTMLSelect>
-            </FormGroup>
-
-            <FormGroup label="Description Field">
-              <HTMLSelect
-                value={formatOptions.descriptionField}
-                onChange={(e) => updateFormatOption('descriptionField', e.target.value)}
-              >
-                <option value="">Select field...</option>
-                {getAllFields().map(field => (
-                  <option key={field} value={field}>{field}</option>
-                ))}
-              </HTMLSelect>
-            </FormGroup>
-
-            <FormGroup label="Link Field">
-              <HTMLSelect
-                value={formatOptions.linkField}
-                onChange={(e) => updateFormatOption('linkField', e.target.value)}
-              >
-                <option value="">Select field...</option>
-                {getAllFields().map(field => (
-                  <option key={field} value={field}>{field}</option>
-                ))}
-              </HTMLSelect>
-            </FormGroup>
-
-            <FormGroup label="Publication Date Field">
-              <HTMLSelect
-                value={formatOptions.pubDateField}
-                onChange={(e) => updateFormatOption('pubDateField', e.target.value)}
-              >
-                <option value="">Select field...</option>
-                {getAllFields().map(field => (
-                  <option key={field} value={field}>{field}</option>
-                ))}
-              </HTMLSelect>
-            </FormGroup>
           </>
         )}
 

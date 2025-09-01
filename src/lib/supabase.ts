@@ -23,7 +23,13 @@ const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
 
 // List of tables that have RLS enabled and require auth
 const RLS_PROTECTED_TABLES = [
-  'data_sources'
+  'data_sources',
+  'api_endpoints',
+  'api_endpoint_sources',
+  'api_documentation',
+  'api_field_mappings',
+  'api_transformations',
+  'api_access_logs'
 ];
 
 // Store the original from method
