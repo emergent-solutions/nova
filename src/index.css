@@ -1,12 +1,4 @@
 @import '@blueprintjs/core/lib/css/blueprint.css';
 
-/* Import AG Grid styles */
-@import 'ag-grid-community/styles/ag-grid.css';
-@import 'ag-grid-community/styles/ag-theme-alpine.css';
-
 /* Base Layout */
 @import 'styles/global.css';
-
-/* Grid Components */
-@import 'styles/ag-grid.css';
-@import 'styles/toolbar.css';

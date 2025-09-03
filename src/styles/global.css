@@ -57,60 +57,6 @@
     margin-bottom: 32px;
   }
   
-  /* Navbar overrides */
-  .bp5-navbar.bp5-dark {
-    background: #2c3e50;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  }
-  
-  /* Card styles */
-  .bp5-card {
-    margin-bottom: 16px;
-  }
-  
-  /* Button styles */
-  .bp5-button {
-    transition: all 0.2s;
-  }
-  
-  .bp5-button:hover {
-    transform: translateY(-1px);
-  }
-  
-  /* Form styles */
-  .bp5-form-group {
-    margin-bottom: 16px;
-  }
-  
-  /* Dialog styles */
-  .api-wizard-dialog {
-    width: 90vw;
-    max-width: 1200px;
-    height: 85vh;
-  }
-  
-  .api-wizard-dialog .bp5-dialog-body {
-    display: flex;
-    height: calc(100% - 100px);
-  }
-  
-  .api-wizard-dialog .bp5-multistep-dialog-left-panel {
-    background: #f5f8fa;
-    border-right: 1px solid #e1e8ed;
-  }
-  
-  .api-wizard-dialog .bp5-multistep-dialog-right-panel {
-    flex: 1;
-    overflow: auto;
-    padding: 24px;
-  }
-  
-  /* Grid styles */
-  .ag-theme-alpine {
-    --ag-header-background-color: #f5f8fa;
-    --ag-header-foreground-color: #394b59;
-    --ag-border-color: #e1e8ed;
-  }
   
   /* Custom scrollbar */
   ::-webkit-scrollbar {
