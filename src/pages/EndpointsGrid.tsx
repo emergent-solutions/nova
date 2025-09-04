@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { AgGridReact } from 'ag-grid-react';
+import React, { useState, useEffect } from 'react';
 import {
   Button,
   ButtonGroup,
@@ -8,7 +7,11 @@ import {
   Icon,
   Dialog,
   Classes,
-  Toaster
+  Toaster,
+  Spinner,
+  Card,
+  NonIdealState,
+  HTMLTable
 } from '@blueprintjs/core';
 import { supabase } from '../lib/supabase';
 import { APIEndpoint } from '../types/api.types';
@@ -22,7 +25,6 @@ interface EndpointsGridProps {
 const toaster = Toaster.create({ position: 'top' });
 
 const EndpointsGrid: React.FC<EndpointsGridProps> = ({ onEditEndpoint, onCreateEndpoint }) => {
-  const gridRef = useRef<AgGridReact>(null);
   const [endpoints, setEndpoints] = useState<APIEndpoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -34,11 +36,15 @@ const EndpointsGrid: React.FC<EndpointsGridProps> = ({ onEditEndpoint, onCreateE
 
   const loadEndpoints = async () => {
     try {
+      console.log('Loading endpoints...');
+      
       const { data, error } = await supabase
         .from('api_endpoints')
         .select('*')
         .order('created_at', { ascending: false });
 
+      console.log('Endpoints response:', { data, error });
+      
       if (error) throw error;
       setEndpoints(data || []);
     } catch (error) {
@@ -95,129 +101,83 @@ const EndpointsGrid: React.FC<EndpointsGridProps> = ({ onEditEndpoint, onCreateE
       loadEndpoints();
     } catch (error) {
       console.error('Failed to toggle endpoint status:', error);
+      toaster.show({ 
+        message: 'Failed to update endpoint status', 
+        intent: Intent.DANGER 
+      });
     }
   };
 
+  const getEndpointUrl = (endpoint: APIEndpoint) => {
+    // Use the current domain as the base URL
+    const baseUrl = window.location.origin;
+    return `${baseUrl}/api/${endpoint.slug}`;
+  };
+
   const copyEndpointUrl = (endpoint: APIEndpoint) => {
-    const url = `https://your-api.com/api/${endpoint.slug}`;
+    const url = getEndpointUrl(endpoint);
     navigator.clipboard.writeText(url);
     toaster.show({ message: 'URL copied to clipboard', intent: Intent.SUCCESS });
   };
 
-  const columnDefs = [
-    {
-      field: 'name',
-      headerName: 'Name',
-      flex: 1,
-      cellRenderer: (params: any) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Icon icon="globe-network" />
-          <strong>{params.value}</strong>
-        </div>
-      )
-    },
-    {
-      field: 'slug',
-      headerName: 'Endpoint URL',
-      flex: 1,
-      cellRenderer: (params: any) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <code style={{ fontSize: '12px' }}>/api/{params.value}</code>
-          <Button
-            minimal
-            small
-            icon="duplicate"
-            onClick={() => copyEndpointUrl(params.data)}
-          />
-        </div>
-      )
-    },
-    {
-      field: 'output_format',
-      headerName: 'Format',
-      width: 100,
-      cellRenderer: (params: any) => (
-        <Tag minimal>{params.value?.toUpperCase()}</Tag>
-      )
-    },
-    {
-      field: 'active',
-      headerName: 'Status',
-      width: 120,
-      cellRenderer: (params: any) => (
-        <Tag 
-          intent={params.value ? Intent.SUCCESS : Intent.NONE}
-          interactive
-          onClick={() => toggleEndpointStatus(params.data)}
-        >
-          {params.value ? 'Active' : 'Inactive'}
-        </Tag>
-      )
-    },
-    {
-      field: 'cache_config',
-      headerName: 'Cache',
-      width: 100,
-      valueGetter: (params: any) => params.data.cache_config?.enabled,
-      cellRenderer: (params: any) => (
-        <Tag minimal intent={params.value ? Intent.PRIMARY : Intent.NONE}>
-          {params.value ? `${params.data.cache_config.ttl}s` : 'Off'}
-        </Tag>
-      )
-    },
-    {
-      field: 'auth_config',
-      headerName: 'Auth',
-      width: 120,
-      valueGetter: (params: any) => params.data.auth_config?.type || 'none',
-      cellRenderer: (params: any) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          {params.value !== 'none' && <Icon icon="lock" size={12} />}
-          <span>{params.value}</span>
-        </div>
-      )
-    },
-    {
-      field: 'created_at',
-      headerName: 'Created',
-      width: 150,
-      valueFormatter: (params: any) => 
-        formatDistanceToNow(new Date(params.value), { addSuffix: true })
-    },
-    {
-      headerName: 'Actions',
-      width: 200,
-      cellRenderer: (params: any) => (
-        <ButtonGroup minimal>
-          <Button
-            icon="edit"
-            onClick={() => onEditEndpoint(params.data)}
-          />
-          <Button
-            icon="play"
-            onClick={() => window.open(`/test/${params.data.slug}`, '_blank')}
-          />
-          <Button
-            icon="document"
-            onClick={() => window.open(`/docs/${params.data.slug}`, '_blank')}
-          />
-          <Button
-            icon="trash"
-            intent={Intent.DANGER}
-            onClick={() => {
-              setSelectedEndpoint(params.data);
-              setDeleteDialogOpen(true);
-            }}
-          />
-        </ButtonGroup>
-      )
+  const testEndpoint = (endpoint: APIEndpoint) => {
+    const url = getEndpointUrl(endpoint);
+    // Open the endpoint in a new tab
+    window.open(url, '_blank');
+  };
+
+  const handleEditEndpoint = async (endpoint: APIEndpoint) => {
+    try {
+      // First, fetch the complete endpoint data with all relationships
+      const { data: fullEndpoint, error: endpointError } = await supabase
+        .from('api_endpoints')
+        .select(`
+          *,
+          api_endpoint_sources (
+            *,
+            data_source:data_sources (*)
+          )
+        `)
+        .eq('id', endpoint.id)
+        .single();
+
+      if (endpointError) throw endpointError;
+
+      console.log('Full endpoint data for editing:', fullEndpoint);
+      
+      // Call the onEditEndpoint prop with the full endpoint data
+      onEditEndpoint(fullEndpoint);
+    } catch (error) {
+      console.error('Failed to load endpoint details:', error);
+      toaster.show({ 
+        message: 'Failed to load endpoint details', 
+        intent: Intent.DANGER 
+      });
     }
-  ];
+  };
+
+  if (loading) {
+    return (
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '100vh' 
+      }}>
+        <Spinner size={50} />
+      </div>
+    );
+  }
 
   return (
-    <div className="endpoints-grid-page">
-      <div className="page-header">
-        <h1>API Endpoints</h1>
+    <div className="endpoints-grid-page" style={{ padding: '24px' }}>
+      <div className="page-header" style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        marginBottom: '24px'
+      }}>
+        <h1 style={{ margin: 0 }}>API Endpoints</h1>
         <Button
           large
           intent={Intent.PRIMARY}
@@ -227,36 +187,164 @@ const EndpointsGrid: React.FC<EndpointsGridProps> = ({ onEditEndpoint, onCreateE
         />
       </div>
 
-      <div className="ag-theme-alpine" style={{ height: 'calc(100vh - 150px)', width: '100%' }}>
-        <AgGridReact
-          ref={gridRef}
-          rowData={endpoints}
-          columnDefs={columnDefs}
-          defaultColDef={{
-            sortable: true,
-            filter: true,
-            resizable: true
-          }}
-          pagination={true}
-          paginationPageSize={20}
-          rowSelection="single"
-          animateRows={true}
-        />
-      </div>
+      {endpoints.length === 0 ? (
+        <Card style={{ padding: '40px', textAlign: 'center' }}>
+          <NonIdealState
+            icon="inbox"
+            title="No endpoints yet"
+            description="Create your first API endpoint to get started"
+            action={
+              <Button 
+                intent={Intent.PRIMARY} 
+                icon="add"
+                text="Create Endpoint"
+                onClick={onCreateEndpoint}
+              />
+            }
+          />
+        </Card>
+      ) : (
+        <Card>
+          <HTMLTable interactive striped style={{ width: '100%' }}>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Endpoint URL</th>
+                <th>Format</th>
+                <th>Status</th>
+                <th>Cache</th>
+                <th>Auth</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {endpoints.map(endpoint => (
+                <tr key={endpoint.id}>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Icon icon="globe-network" />
+                      <strong>{endpoint.name}</strong>
+                    </div>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <code style={{ 
+                        fontSize: '12px',
+                        backgroundColor: '#f5f5f5',
+                        padding: '2px 6px',
+                        borderRadius: '3px'
+                      }}>
+                        /api/{endpoint.slug}
+                      </code>
+                      <Button
+                        minimal
+                        small
+                        icon="duplicate"
+                        onClick={() => copyEndpointUrl(endpoint)}
+                        title="Copy full URL"
+                      />
+                    </div>
+                  </td>
+                  <td>
+                    <Tag minimal>{endpoint.output_format?.toUpperCase() || 'JSON'}</Tag>
+                  </td>
+                  <td>
+                    <Tag 
+                      intent={endpoint.active ? Intent.SUCCESS : Intent.NONE}
+                      interactive
+                      onClick={() => toggleEndpointStatus(endpoint)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {endpoint.active ? 'Active' : 'Inactive'}
+                    </Tag>
+                  </td>
+                  <td>
+                    <Tag minimal intent={endpoint.cache_config?.enabled ? Intent.PRIMARY : Intent.NONE}>
+                      {endpoint.cache_config?.enabled ? `${endpoint.cache_config.ttl}s` : 'Off'}
+                    </Tag>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      {endpoint.auth_config?.type && endpoint.auth_config.type !== 'none' && (
+                        <Icon icon="lock" size={12} />
+                      )}
+                      <span>{endpoint.auth_config?.type || 'none'}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <span style={{ fontSize: '12px', color: '#5c7080' }}>
+                      {formatDistanceToNow(new Date(endpoint.created_at), { addSuffix: true })}
+                    </span>
+                  </td>
+                  <td>
+                    <ButtonGroup minimal>
+                      <Button
+                        icon="edit"
+                        small
+                        onClick={() => handleEditEndpoint(endpoint)}
+                        title="Edit endpoint"
+                      />
+                      <Button
+                        icon="play"
+                        small
+                        intent={Intent.PRIMARY}
+                        onClick={() => testEndpoint(endpoint)}
+                        title="Open endpoint in new tab"
+                      />
+                      <Button
+                        icon="document"
+                        small
+                        onClick={() => window.open(`/docs/${endpoint.slug}`, '_blank')}
+                        title="View documentation"
+                      />
+                      <Button
+                        icon="trash"
+                        small
+                        intent={Intent.DANGER}
+                        onClick={() => {
+                          setSelectedEndpoint(endpoint);
+                          setDeleteDialogOpen(true);
+                        }}
+                        title="Delete endpoint"
+                      />
+                    </ButtonGroup>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </HTMLTable>
+        </Card>
+      )}
 
       <Dialog
         isOpen={deleteDialogOpen}
         onClose={() => setDeleteDialogOpen(false)}
         title="Delete Endpoint"
+        icon="trash"
+        canEscapeKeyClose
+        canOutsideClickClose
       >
         <div className={Classes.DIALOG_BODY}>
-          <p>Are you sure you want to delete the endpoint <strong>{selectedEndpoint?.name}</strong>?</p>
-          <p>This action cannot be undone.</p>
+          <p>
+            Are you sure you want to delete the endpoint <strong>{selectedEndpoint?.name}</strong>?
+          </p>
+          <p style={{ color: '#d13913' }}>
+            <Icon icon="warning-sign" /> This action cannot be undone.
+          </p>
         </div>
         <div className={Classes.DIALOG_FOOTER}>
           <div className={Classes.DIALOG_FOOTER_ACTIONS}>
-            <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
-            <Button intent={Intent.DANGER} onClick={handleDelete}>Delete</Button>
+            <Button 
+              onClick={() => setDeleteDialogOpen(false)}
+              text="Cancel"
+            />
+            <Button 
+              intent={Intent.DANGER} 
+              onClick={handleDelete}
+              text="Delete"
+              icon="trash"
+            />
           </div>
         </div>
       </Dialog>
