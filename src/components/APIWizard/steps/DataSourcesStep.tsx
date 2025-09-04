@@ -72,7 +72,7 @@ const DataSourcesStep: React.FC<DataSourcesStepProps> = ({
   const totalSelected = selectedDataSources.length + newDataSources.filter(ds => ds.name && ds.type).length;
 
   return (
-    <div className="datasources-step" style={{ padding: '20px' }}>
+    <div className="datasources-step">
       <Callout intent={Intent.PRIMARY} icon="info-sign">
         Select existing data sources or create new ones to combine into your API endpoint.
         You can create relationships between multiple sources in the next step.

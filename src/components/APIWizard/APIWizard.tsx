@@ -5,17 +5,11 @@ import {
   MultistepDialog,
   Button,
   Intent,
-  Card,
   FormGroup,
   InputGroup,
-  HTMLSelect,
-  RadioGroup,
-  Radio,
-  Icon,
   Callout,
-  NonIdealState,
-  Tag,
-  Classes
+  Card,
+  Toaster
 } from '@blueprintjs/core';
 import { APIEndpointConfig } from '../../types/schema.types';
 import DataSourcesStep from './steps/DataSourcesStep';
@@ -28,6 +22,9 @@ import AuthenticationStep from './steps/AuthenticationStep';
 import TestingStep from './steps/TestingStep';
 import DeploymentStep from './steps/DeploymentStep';
 import { supabase } from '../../lib/supabase';
+import './APIWizard.css';
+
+const toaster = Toaster.create({ position: 'top' });
 
 interface APIWizardProps {
   isOpen: boolean;
@@ -42,28 +39,9 @@ interface DataSourceConfig {
   name: string;
   type: 'api' | 'database' | 'file' | 'rss' | null;
   isNew: boolean;
-  // API config
-  api_config?: {
-    url?: string;
-    method?: string;
-    headers?: Record<string, string>;
-    auth_type?: string;
-    auth_config?: Record<string, any>;
-  };
-  // Database config
-  database_config?: {
-    dbType?: string;
-    connections?: Record<string, any>;
-    queries?: Record<string, any>;
-  };
-  // File config
-  file_config?: {
-    source?: string;
-    url?: string;
-    fileName?: string;
-    format?: string;
-    headers?: string[];
-  };
+  api_config?: any;
+  database_config?: any;
+  file_config?: any;
 }
 
 export const APIWizard: React.FC<APIWizardProps> = ({
@@ -73,49 +51,74 @@ export const APIWizard: React.FC<APIWizardProps> = ({
   onClose,
   onComplete
 }) => {
-  const [config, setConfig] = useState<APIEndpointConfig>({
-    name: '',
-    description: '',
-    slug: '',
-    dataSources: [],
-    relationships: [],
-    outputFormat: 'json',
-    outputSchema: {
-      root: {
-        key: 'root',
-        type: 'object',
-        children: []
+  // Initialize config with existing endpoint data if in edit mode
+  const [config, setConfig] = useState<APIEndpointConfig>(() => {
+    if (mode === 'edit' && existingEndpoint) {
+      return {
+        name: existingEndpoint.name || '',
+        description: existingEndpoint.description || '',
+        slug: existingEndpoint.slug || '',
+        dataSources: existingEndpoint.api_endpoint_sources?.map((s: any) => s.data_source) || [],
+        relationships: existingEndpoint.relationship_config?.relationships || [],
+        outputFormat: existingEndpoint.output_format || 'json',
+        outputSchema: existingEndpoint.schema_config?.schema || {
+          root: { key: 'root', type: 'object', children: [] },
+          version: '1.0.0',
+          format: 'json'
+        },
+        fieldMappings: existingEndpoint.schema_config?.mapping || [],
+        transformations: existingEndpoint.transform_config?.transformations || [],
+        authentication: existingEndpoint.auth_config || { required: false, type: 'none' },
+        caching: existingEndpoint.cache_config || { enabled: false, ttl: 300 },
+        rateLimiting: existingEndpoint.rate_limit_config || { enabled: false, requests_per_minute: 60 }
+      };
+    }
+    
+    return {
+      name: '',
+      description: '',
+      slug: '',
+      dataSources: [],
+      relationships: [],
+      outputFormat: 'json',
+      outputSchema: {
+        root: { key: 'root', type: 'object', children: [] },
+        version: '1.0.0',
+        format: 'json'
       },
-      version: '1.0.0',
-      format: 'json'
-    },
-    fieldMappings: [],
-    transformations: [],
-    authentication: {
-      required: false,
-      type: 'none'
-    },
-    caching: {
-      enabled: false,
-      ttl: 300
-    },
-    rateLimiting: {
-      enabled: false,
-      requests_per_minute: 60
-    },
-    ...existingEndpoint
+      fieldMappings: [],
+      transformations: [],
+      authentication: { required: false, type: 'none' },
+      caching: { enabled: false, ttl: 300 },
+      rateLimiting: { enabled: false, requests_per_minute: 60 }
+    };
   });
 
   const [isDeploying, setIsDeploying] = useState(false);
+  
+  // Always start at basic, we'll change it for edit mode after mount
   const [currentStepId, setCurrentStepId] = useState<string>('basic');
+  
   const [existingDataSources, setExistingDataSources] = useState<any[]>([]);
   const [newDataSources, setNewDataSources] = useState<DataSourceConfig[]>([]);
-  const [selectedDataSources, setSelectedDataSources] = useState<string[]>([]);
+  const [selectedDataSources, setSelectedDataSources] = useState<string[]>(() => {
+    if (mode === 'edit' && existingEndpoint?.api_endpoint_sources) {
+      return existingEndpoint.api_endpoint_sources.map((s: any) => s.data_source_id);
+    }
+    return [];
+  });
 
-  // Debug logging
+  // Force navigation to deployment step when in edit mode after dialog opens
   useEffect(() => {
-    console.log('Selected data sources:', selectedDataSources);
-  }, [selectedDataSources]);
+    if (isOpen && mode === 'edit') {
+      // Use a timeout to ensure the dialog has rendered
+      const timer = setTimeout(() => {
+        setCurrentStepId('deployment');
+      }, 100);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, mode]);
 
   // Load existing data sources when dialog opens
   useEffect(() => {
@@ -123,21 +126,6 @@ export const APIWizard: React.FC<APIWizardProps> = ({
       loadExistingDataSources();
     }
   }, [isOpen]);
-
-  // Create a computed value for all data sources
-  const allDataSources = React.useMemo(() => {
-    const selectedExisting = existingDataSources.filter(ds => 
-      selectedDataSources.includes(ds.id)
-    );
-    const validNew = newDataSources.filter(ds => ds.name && ds.type);
-    
-    return [...selectedExisting, ...validNew];
-  }, [existingDataSources, selectedDataSources, newDataSources]);
-  
-  // Update the config whenever allDataSources changes
-  useEffect(() => {
-    updateConfig({ dataSources: allDataSources });
-  }, [allDataSources]);
 
   const loadExistingDataSources = async () => {
     try {
@@ -178,170 +166,213 @@ export const APIWizard: React.FC<APIWizardProps> = ({
     setNewDataSources(prev => prev.filter((_, i) => i !== index));
   };
 
-  const validateDataSources = () => {
-    // Check if at least one data source is selected or created
-    const hasSelectedExisting = selectedDataSources.length > 0;
-    const hasValidNew = newDataSources.length > 0; // Just having new sources is enough at this stage
+  const allDataSources = React.useMemo(() => {
+    const selectedExisting = existingDataSources.filter(ds => 
+      selectedDataSources.includes(ds.id)
+    );
+    const validNew = newDataSources.filter(ds => ds.name && ds.type);
     
-    return hasSelectedExisting || hasValidNew;
-  };
+    return [...selectedExisting, ...validNew];
+  }, [existingDataSources, selectedDataSources, newDataSources]);
 
-  const validateDataSourceConfig = (dataSource: DataSourceConfig): boolean => {
-    if (!dataSource.name || !dataSource.type) return false;
-    
-    switch (dataSource.type) {
-      case 'api':
-        return !!(dataSource.api_config?.url);
-      case 'database':
-        // For database, just having the type selected is enough initially
-        return !!(dataSource.database_config?.dbType);
-      case 'file':
-        return !!(dataSource.file_config?.url || dataSource.file_config?.source === 'upload');
-      default:
-        return true; // For other types, basic info is enough
-    }
+  useEffect(() => {
+    updateConfig({ dataSources: allDataSources });
+  }, [allDataSources]);
+
+  const validateDataSources = () => {
+    return selectedDataSources.length > 0 || newDataSources.some(ds => ds.name && ds.type);
   };
 
   const handleDeploy = async () => {
     try {
       setIsDeploying(true);
-
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      console.log('User check:', { 
-        hasUser: !!user, 
-        userId: user?.id,
-        userError 
-      });
+      const { data: { user } } = await supabase.auth.getUser();
       
       if (!user) {
         throw new Error('No authenticated user');
       }
       
-      // First, save any new data sources
-      const createdDataSourceIds: string[] = [];
-      
-      for (const newDs of newDataSources) {
-        if (newDs.name && newDs.type && validateDataSourceConfig(newDs)) {
-          const { data: createdDs, error } = await supabase
-            .from('data_sources')
-            .insert({
-              name: newDs.name,
-              type: newDs.type,
-              active: true,
-              api_config: newDs.api_config,
-              database_config: newDs.database_config,
-              file_config: newDs.file_config,
-              user_id: user.id
-            })
-            .select()
-            .single();
-          
-          if (error) throw error;
-          if (createdDs) {
-            createdDataSourceIds.push(createdDs.id);
+      if (mode === 'edit' && existingEndpoint) {
+        // Update existing endpoint
+        const { data, error } = await supabase
+          .from('api_endpoints')
+          .update({
+            name: config.name,
+            slug: config.slug,
+            description: config.description,
+            output_format: config.outputFormat,
+            schema_config: {
+              type: 'custom',
+              schema: config.outputSchema,
+              mapping: config.fieldMappings
+            },
+            transform_config: {
+              transformations: config.transformations
+            },
+            relationship_config: {
+              relationships: config.relationships
+            },
+            auth_config: config.authentication,
+            cache_config: config.caching,
+            rate_limit_config: config.rateLimiting,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existingEndpoint.id)
+          .select()
+          .single();
+
+        if (error) throw error;
+        
+        toaster.show({ 
+          message: 'Endpoint updated successfully', 
+          intent: Intent.SUCCESS 
+        });
+        
+        onComplete(data);
+        onClose();
+      } else {
+        // Create new endpoint
+        const createdDataSourceIds: string[] = [];
+        
+        for (const newDs of newDataSources) {
+          if (newDs.name && newDs.type) {
+            const { data: createdDs, error } = await supabase
+              .from('data_sources')
+              .insert({
+                name: newDs.name,
+                type: newDs.type,
+                active: true,
+                api_config: newDs.api_config,
+                database_config: newDs.database_config,
+                file_config: newDs.file_config,
+                user_id: user.id
+              })
+              .select()
+              .single();
+            
+            if (error) throw error;
+            if (createdDs) {
+              createdDataSourceIds.push(createdDs.id);
+            }
           }
         }
+        
+        const allDataSourceIds = [...selectedDataSources, ...createdDataSourceIds];
+        
+        const { data, error } = await supabase
+          .from('api_endpoints')
+          .insert({
+            name: config.name,
+            slug: config.slug,
+            description: config.description,
+            output_format: config.outputFormat,
+            schema_config: {
+              type: 'custom',
+              schema: config.outputSchema,
+              mapping: config.fieldMappings
+            },
+            transform_config: {
+              transformations: config.transformations
+            },
+            relationship_config: {
+              relationships: config.relationships
+            },
+            auth_config: config.authentication,
+            cache_config: config.caching,
+            rate_limit_config: config.rateLimiting,
+            active: true,
+            user_id: user.id
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        if (data && allDataSourceIds.length > 0) {
+          const sourceRelations = allDataSourceIds.map((sourceId, index) => ({
+            endpoint_id: data.id,
+            data_source_id: sourceId,
+            is_primary: index === 0,
+            sort_order: index
+          }));
+
+          await supabase
+            .from('api_endpoint_sources')
+            .insert(sourceRelations);
+        }
+
+        toaster.show({ 
+          message: 'Endpoint created successfully', 
+          intent: Intent.SUCCESS 
+        });
+
+        onComplete(data);
+        onClose();
       }
-      
-      // Combine selected existing and newly created data source IDs
-      const allDataSourceIds = [...selectedDataSources, ...createdDataSourceIds];
-      
-      // Save the API endpoint
-      const { data, error } = await supabase
-        .from('api_endpoints')
-        .insert({
-          name: config.name,
-          slug: config.slug,
-          description: config.description,
-          output_format: config.outputFormat,
-          schema_config: {
-            type: 'custom',
-            schema: config.outputSchema,
-            mapping: config.fieldMappings
-          },
-          transform_config: {
-            transformations: config.transformations
-          },
-          relationship_config: {
-            relationships: config.relationships
-          },
-          auth_config: config.authentication,
-          cache_config: config.caching,
-          rate_limit_config: config.rateLimiting,
-          active: true,
-          user_id: user.id
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      // Save data source relationships
-      if (data && allDataSourceIds.length > 0) {
-        const sourceRelations = allDataSourceIds.map((sourceId, index) => ({
-          endpoint_id: data.id,
-          data_source_id: sourceId,
-          is_primary: index === 0,
-          sort_order: index
-        }));
-
-        await supabase
-          .from('api_endpoint_sources')
-          .insert(sourceRelations);
-      }
-
-      onComplete(data);
-      onClose();
     } catch (error) {
       console.error('Failed to deploy endpoint:', error);
+      toaster.show({ 
+        message: `Failed to ${mode === 'edit' ? 'update' : 'create'} endpoint`, 
+        intent: Intent.DANGER 
+      });
     } finally {
       setIsDeploying(false);
     }
   };
 
-  // Get validation state for current step
   const isCurrentStepValid = (): boolean => {
+    // In edit mode, all steps are valid since data exists
+    if (mode === 'edit') return true;
+    
     switch (currentStepId) {
       case 'basic':
         return !!(config.name && config.slug);
       case 'datasources':
         return validateDataSources();
       case 'configure-source':
-        // For configuration step, we just need name and type for each new source
         return newDataSources.every(ds => ds.name && ds.type);
       default:
         return true;
     }
   };
 
+  // Define the initial step based on mode
+  const initialStepId = mode === 'edit' ? 'deployment' : 'basic';
+
   return (
     <MultistepDialog
       isOpen={isOpen}
       onClose={onClose}
-      title={mode === 'create' ? 'Create API Endpoint' : 'Edit API Endpoint'}
+      title={mode === 'create' ? 'Create API Endpoint' : `Edit Endpoint: ${config.name}`}
       navigationPosition="left"
       showCloseButtonInFooter={false}
-      canEscapeKeyClose={false}
+      canEscapeKeyClose={true}
       canOutsideClickClose={false}
-      className="api-wizard-dialog wide-multistep-dialog"
+      className="api-wizard-dialog"
+      initialStepIndex={mode === 'edit' ? 9 : 0} // Set to last step index if editing
       currentStepId={currentStepId}
       onChange={(newStepId) => setCurrentStepId(newStepId)}
       nextButtonProps={{
-        disabled: !isCurrentStepValid()
+        disabled: mode === 'create' && !isCurrentStepValid()
       }}
       finalButtonProps={{
-        text: 'Deploy Endpoint',
+        text: mode === 'edit' ? 'Save Changes' : 'Deploy Endpoint',
         intent: Intent.PRIMARY,
         loading: isDeploying,
         onClick: handleDeploy,
-        disabled: !isCurrentStepValid()
+        disabled: mode === 'create' && !isCurrentStepValid()
       }}
     >
       <DialogStep
         id="basic"
         title="Basic Info"
         panel={
-          <div style={{ padding: '20px' }}>
+          <div className="basic-info-step">
+            {mode === 'edit' && (
+              <Callout intent={Intent.PRIMARY} icon="info-sign" style={{ marginBottom: '20px' }}>
+                <strong>Edit Mode:</strong> All steps are now accessible. Navigate using the sidebar or Previous/Next buttons.
+              </Callout>
+            )}
             <FormGroup label="Endpoint Name" labelInfo="(required)">
               <InputGroup
                 value={config.name}
@@ -359,14 +390,14 @@ export const APIWizard: React.FC<APIWizardProps> = ({
               />
               {config.slug && (
                 <Callout intent={Intent.PRIMARY} style={{ marginTop: '10px' }}>
-                  Your API will be available at: <code>/api/v1/{config.slug}</code>
+                  Your API will be available at: <code>/api/{config.slug}</code>
                 </Callout>
               )}
             </FormGroup>
             
             <FormGroup label="Description">
               <InputGroup
-                value={config.description}
+                value={config.description || ''}
                 onChange={(e) => updateConfig({ description: e.target.value })}
                 placeholder="Describe what this endpoint does..."
               />
@@ -411,10 +442,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
           <RelationshipsStep
             config={config}
             onUpdate={updateConfig}
-            availableDataSources={[
-              ...existingDataSources.filter(ds => selectedDataSources.includes(ds.id)),
-              ...newDataSources.filter(ds => ds.name && ds.type)
-            ]}
+            availableDataSources={allDataSources}
           />
         }
       />
@@ -437,7 +465,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
           <OutputFormatStep
             config={{
               ...config,
-              dataSources: allDataSources // Ensure it has the latest
+              dataSources: allDataSources
             }}
             onUpdate={updateConfig}
           />
@@ -485,6 +513,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
             config={config}
             onDeploy={handleDeploy}
             isDeploying={isDeploying}
+            mode={mode}
           />
         }
       />
