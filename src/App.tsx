@@ -25,6 +25,8 @@ const App: React.FC = () => {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardMode, setWizardMode] = useState<'create' | 'edit'>('create');
   const [editingEndpoint, setEditingEndpoint] = useState(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
 
   const handleCreateEndpoint = () => {
     setWizardMode('create');
@@ -120,7 +122,7 @@ const App: React.FC = () => {
               currentView === 'dashboard' ? 
                 <Dashboard onCreateEndpoint={handleCreateEndpoint} /> :
               currentView === 'endpoints' ?
-                <EndpointsGrid onEditEndpoint={handleEditEndpoint} onCreateEndpoint={handleCreateEndpoint} /> :
+                <EndpointsGrid onEditEndpoint={handleEditEndpoint} onCreateEndpoint={handleCreateEndpoint} refreshTrigger={refreshTrigger} /> :
               currentView === 'analytics' ?
                 <Analytics /> :
                 <Documentation />
@@ -138,6 +140,7 @@ const App: React.FC = () => {
             onComplete={(endpoint) => {
               setWizardOpen(false);
               setCurrentView('endpoints');
+              setRefreshTrigger(prev => prev + 1); // Trigger refresh
             }}
           />
         )}

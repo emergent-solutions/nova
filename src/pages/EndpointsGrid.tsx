@@ -24,7 +24,7 @@ interface EndpointsGridProps {
 
 const toaster = Toaster.create({ position: 'top' });
 
-const EndpointsGrid: React.FC<EndpointsGridProps> = ({ onEditEndpoint, onCreateEndpoint }) => {
+const EndpointsGrid: React.FC<EndpointsGridProps> = ({ onEditEndpoint, onCreateEndpoint, refreshTrigger }) => {
   const [endpoints, setEndpoints] = useState<APIEndpoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -32,7 +32,7 @@ const EndpointsGrid: React.FC<EndpointsGridProps> = ({ onEditEndpoint, onCreateE
 
   useEffect(() => {
     loadEndpoints();
-  }, []);
+  }, [refreshTrigger]);
 
   const loadEndpoints = async () => {
     try {
