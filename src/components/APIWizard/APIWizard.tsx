@@ -54,11 +54,14 @@ export const APIWizard: React.FC<APIWizardProps> = ({
   // Initialize config with existing endpoint data if in edit mode
   const [config, setConfig] = useState<APIEndpointConfig>(() => {
     if (mode === 'edit' && existingEndpoint) {
+      // Extract all data sources that are connected to this endpoint
+      const connectedDataSources = existingEndpoint.api_endpoint_sources?.map((s: any) => s.data_source) || [];
+      
       return {
         name: existingEndpoint.name || '',
         description: existingEndpoint.description || '',
         slug: existingEndpoint.slug || '',
-        dataSources: existingEndpoint.api_endpoint_sources?.map((s: any) => s.data_source) || [],
+        dataSources: connectedDataSources,  // Use the actual data source objects
         relationships: existingEndpoint.relationship_config?.relationships || [],
         outputFormat: existingEndpoint.output_format || 'json',
         outputSchema: existingEndpoint.schema_config?.schema || {
@@ -75,38 +78,32 @@ export const APIWizard: React.FC<APIWizardProps> = ({
     }
     
     return {
-      name: '',
-      description: '',
-      slug: '',
-      dataSources: [],
-      relationships: [],
-      outputFormat: 'json',
-      outputSchema: {
-        root: { key: 'root', type: 'object', children: [] },
-        version: '1.0.0',
-        format: 'json'
-      },
-      fieldMappings: [],
-      transformations: [],
-      authentication: { required: false, type: 'none' },
-      caching: { enabled: false, ttl: 300 },
-      rateLimiting: { enabled: false, requests_per_minute: 60 }
+      // ... default empty config
     };
   });
-
-  const [isDeploying, setIsDeploying] = useState(false);
-  
-  // Always start at basic, we'll change it for edit mode after mount
-  const [currentStepId, setCurrentStepId] = useState<string>('basic');
-  
+  const [isDeploying, setIsDeploying] = useState(false);  
+  const [currentStepId, setCurrentStepId] = useState<string>('basic');  
   const [existingDataSources, setExistingDataSources] = useState<any[]>([]);
   const [newDataSources, setNewDataSources] = useState<DataSourceConfig[]>([]);
   const [selectedDataSources, setSelectedDataSources] = useState<string[]>(() => {
-    if (mode === 'edit' && existingEndpoint?.api_endpoint_sources) {
-      return existingEndpoint.api_endpoint_sources.map((s: any) => s.data_source_id);
+    if (mode === 'edit' && existingEndpoint) {
+      // Get all source IDs from both api_endpoint_sources AND sourceMappings
+      const endpointSourceIds = existingEndpoint.api_endpoint_sources?.map((s: any) => s.data_source_id) || [];
+      
+      // Also check if there are sources in the RSS configuration
+      const rssSourceIds = existingEndpoint.schema_config?.schema?.metadata?.sourceMappings
+        ?.filter(m => m.enabled)
+        ?.map(m => m.sourceId) || [];
+      
+      // Combine and deduplicate
+      const allSourceIds = [...new Set([...endpointSourceIds, ...rssSourceIds])];
+      
+      return allSourceIds;
     }
     return [];
   });
+  const [isSavingDataSources, setIsSavingDataSources] = useState(false);
+  const [pendingStepChange, setPendingStepChange] = useState<string | null>(null);
 
   // Force navigation to deployment step when in edit mode after dialog opens
   useEffect(() => {
@@ -145,6 +142,107 @@ export const APIWizard: React.FC<APIWizardProps> = ({
 
   const updateConfig = (updates: Partial<APIEndpointConfig>) => {
     setConfig(prev => ({ ...prev, ...updates }));
+  };
+
+  const saveAllNewDataSources = async (): Promise<boolean> => {
+    const unsavedDataSources = newDataSources.filter(ds => !ds.id && ds.name && ds.type);
+    
+    if (unsavedDataSources.length === 0) {
+      return true; // Nothing to save
+    }
+  
+    setIsSavingDataSources(true);
+    
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        throw new Error('User not authenticated');
+      }
+  
+      // Save all unsaved data sources
+      for (let i = 0; i < newDataSources.length; i++) {
+        const source = newDataSources[i];
+        
+        // Skip if already saved or incomplete
+        if (source.id || !source.name || !source.type) {
+          continue;
+        }
+  
+        // Validate based on type
+        if (source.type === 'api' && !source.api_config?.url) {
+          toaster.show({
+            message: `Data source "${source.name}" is missing required API URL`,
+            intent: Intent.WARNING
+          });
+          setIsSavingDataSources(false);
+          return false;
+        }
+  
+        if (source.type === 'rss' && !source.rss_config?.feed_url) {
+          toaster.show({
+            message: `Data source "${source.name}" is missing required RSS feed URL`,
+            intent: Intent.WARNING
+          });
+          setIsSavingDataSources(false);
+          return false;
+        }
+  
+        if (source.type === 'file' && !source.file_config?.url) {
+          toaster.show({
+            message: `Data source "${source.name}" is missing required file URL`,
+            intent: Intent.WARNING
+          });
+          setIsSavingDataSources(false);
+          return false;
+        }
+  
+        const dataSourceData = {
+          name: source.name,
+          type: source.type,
+          active: true,
+          api_config: source.type === 'api' ? source.api_config : null,
+          database_config: source.type === 'database' ? source.database_config : null,
+          file_config: source.type === 'file' ? source.file_config : null,
+          rss_config: source.type === 'rss' ? source.rss_config : null,
+          user_id: user.id
+        };
+  
+        const { data, error } = await supabase
+          .from('data_sources')
+          .insert(dataSourceData)
+          .select()
+          .single();
+        
+        if (error) {
+          throw new Error(`Failed to save ${source.name}: ${error.message}`);
+        }
+  
+        // Update the data source with the saved ID
+        updateNewDataSource(i, {
+          ...source,
+          id: data.id,
+          isNew: false
+        });
+      }
+  
+      toaster.show({
+        message: `Successfully saved ${unsavedDataSources.length} data source(s)`,
+        intent: Intent.SUCCESS
+      });
+  
+      setIsSavingDataSources(false);
+      return true;
+      
+    } catch (error: any) {
+      console.error('Error saving data sources:', error);
+      toaster.show({
+        message: `Failed to save data sources: ${error.message}`,
+        intent: Intent.DANGER
+      });
+      setIsSavingDataSources(false);
+      return false;
+    }
   };
 
   const handleAddNewDataSource = () => {
@@ -191,6 +289,20 @@ export const APIWizard: React.FC<APIWizardProps> = ({
       if (!user) {
         throw new Error('No authenticated user');
       }
+
+      // Ensure outputSchema includes all the RSS configuration
+      const schemaConfig = {
+        type: 'custom',
+        schema: {
+          ...config.outputSchema,
+          // Make sure metadata includes all RSS settings
+          metadata: {
+            ...config.outputSchema?.metadata,
+            // Include any additional format-specific options that might be stored separately
+          }
+        },
+        mapping: config.fieldMappings
+      };
       
       if (mode === 'edit' && existingEndpoint) {
         // Update existing endpoint
@@ -201,11 +313,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
             slug: config.slug,
             description: config.description,
             output_format: config.outputFormat,
-            schema_config: {
-              type: 'custom',
-              schema: config.outputSchema,
-              mapping: config.fieldMappings
-            },
+            schema_config: schemaConfig,  // Use the updated schema config
             transform_config: {
               transformations: config.transformations
             },
@@ -220,8 +328,49 @@ export const APIWizard: React.FC<APIWizardProps> = ({
           .eq('id', existingEndpoint.id)
           .select()
           .single();
-
+  
         if (error) throw error;
+        
+        // Handle data source updates for RSS multi-source
+        if (config.outputFormat === 'rss' && config.outputSchema?.metadata?.sourceMappings) {
+          // Update api_endpoint_sources table with new sources
+          const sourceMappings = config.outputSchema.metadata.sourceMappings;
+          const enabledSources = sourceMappings.filter(m => m.enabled);
+          
+          // First, get current sources
+          const { data: currentSources } = await supabase
+            .from('api_endpoint_sources')
+            .select('*')
+            .eq('endpoint_id', existingEndpoint.id);
+          
+          // Delete removed sources
+          const currentSourceIds = currentSources?.map(s => s.data_source_id) || [];
+          const newSourceIds = enabledSources.map(s => s.sourceId);
+          const toDelete = currentSourceIds.filter(id => !newSourceIds.includes(id));
+          
+          if (toDelete.length > 0) {
+            await supabase
+              .from('api_endpoint_sources')
+              .delete()
+              .eq('endpoint_id', existingEndpoint.id)
+              .in('data_source_id', toDelete);
+          }
+          
+          // Add new sources
+          const toAdd = newSourceIds.filter(id => !currentSourceIds.includes(id));
+          if (toAdd.length > 0) {
+            const newRelations = toAdd.map((sourceId, index) => ({
+              endpoint_id: existingEndpoint.id,
+              data_source_id: sourceId,
+              is_primary: false,
+              sort_order: currentSources?.length + index || index
+            }));
+            
+            await supabase
+              .from('api_endpoint_sources')
+              .insert(newRelations);
+          }
+        }
         
         toaster.show({ 
           message: 'Endpoint updated successfully', 
@@ -299,6 +448,28 @@ export const APIWizard: React.FC<APIWizardProps> = ({
           await supabase
             .from('api_endpoint_sources')
             .insert(sourceRelations);
+
+          if (config.outputFormat === 'rss' && config.outputSchema?.metadata?.sourceMappings) {
+            const sourceMappings = config.outputSchema.metadata.sourceMappings;
+            const enabledRssSources = sourceMappings.filter(m => m.enabled);
+            
+            // Get source IDs that are in RSS config but not in allDataSourceIds
+            const rssSourceIds = enabledRssSources.map(s => s.sourceId);
+            const additionalSources = rssSourceIds.filter(id => !allDataSourceIds.includes(id));
+            
+            if (additionalSources.length > 0) {
+              const additionalRelations = additionalSources.map((sourceId, index) => ({
+                endpoint_id: data.id,
+                data_source_id: sourceId,
+                is_primary: false,
+                sort_order: allDataSourceIds.length + index
+              }));
+              
+              await supabase
+                .from('api_endpoint_sources')
+                .insert(additionalRelations);
+            }
+          }
         }
 
         toaster.show({ 
@@ -336,8 +507,33 @@ export const APIWizard: React.FC<APIWizardProps> = ({
     }
   };
 
-  // Define the initial step based on mode
-  const initialStepId = mode === 'edit' ? 'deployment' : 'basic';
+  const handleStepChange = async (newStepId: string, prevStepId?: string) => {
+    // Check if we're leaving the "configure-source" step
+    if (prevStepId === 'configure-source' || currentStepId === 'configure-source') {
+      // Check if there are unsaved data sources
+      const hasUnsavedDataSources = newDataSources.some(ds => !ds.id && ds.name && ds.type);
+      
+      if (hasUnsavedDataSources) {
+        // Save all data sources before proceeding
+        setPendingStepChange(newStepId);
+        const saveSuccess = await saveAllNewDataSources();
+        
+        if (saveSuccess) {
+          setCurrentStepId(newStepId);
+          setPendingStepChange(null);
+        } else {
+          // Stay on current step if save failed
+          setPendingStepChange(null);
+          return;
+        }
+      } else {
+        setCurrentStepId(newStepId);
+      }
+    } else {
+      setCurrentStepId(newStepId);
+    }
+  };
+  
 
   return (
     <MultistepDialog
@@ -351,9 +547,10 @@ export const APIWizard: React.FC<APIWizardProps> = ({
       className="api-wizard-dialog"
       initialStepIndex={mode === 'edit' ? 9 : 0} // Set to last step index if editing
       currentStepId={currentStepId}
-      onChange={(newStepId) => setCurrentStepId(newStepId)}
+      onChange={handleStepChange}
       nextButtonProps={{
-        disabled: mode === 'create' && !isCurrentStepValid()
+        disabled: mode === 'create' && !isCurrentStepValid(),
+        loading: isSavingDataSources // Show loading state when saving
       }}
       finalButtonProps={{
         text: mode === 'edit' ? 'Save Changes' : 'Deploy Endpoint',
@@ -427,10 +624,29 @@ export const APIWizard: React.FC<APIWizardProps> = ({
           id="configure-source"
           title="Configure New Sources"
           panel={
-            <DataSourceConfigStep
-              dataSources={newDataSources}
-              onUpdate={updateNewDataSource}
-            />
+            <div>
+              {/* Add a status bar at the top */}
+              {newDataSources.some(ds => !ds.id) && (
+                <Callout intent={Intent.WARNING} icon="info-sign" style={{ marginBottom: '20px' }}>
+                  <strong>Note:</strong> Data sources will be automatically saved when you click Next.
+                  {newDataSources.filter(ds => !ds.id && ds.name && ds.type).length > 0 && (
+                    <span> ({newDataSources.filter(ds => !ds.id && ds.name && ds.type).length} unsaved)</span>
+                  )}
+                </Callout>
+              )}
+              
+              {/* Add save status for each data source */}
+              {newDataSources.every(ds => ds.id || (!ds.name || !ds.type)) && newDataSources.length > 0 && (
+                <Callout intent={Intent.SUCCESS} icon="tick" style={{ marginBottom: '20px' }}>
+                  All configured data sources have been saved!
+                </Callout>
+              )}
+              
+              <DataSourceConfigStep
+                dataSources={newDataSources}
+                onUpdate={updateNewDataSource}
+              />
+            </div>
           }
         />
       )}

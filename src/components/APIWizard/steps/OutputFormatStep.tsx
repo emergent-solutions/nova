@@ -18,12 +18,14 @@ import {
   Tag,
   RadioGroup,
   Radio,
-  Classes
+  Classes,
+  Divider
 } from '@blueprintjs/core';
 import { APIEndpointConfig } from '../../../types/schema.types';
 import { DataSource } from '../../../types/datasource.types';
 import { useFetchProxy } from '../../../hooks/useFetchProxy';
 import { JsonPathExplorer } from '../../JsonPathExplorer/JsonPathExplorer';
+import MultiSourceFieldMapper from '../../MultiSourceFieldMapper';
 
 // Helper to extract field paths
 function extractFieldPaths(obj: any, prefix = ''): Array<{ path: string; display: string }> {
@@ -71,6 +73,21 @@ const getDefaultChannelLink = () => {
 const AppToaster = Toaster.create({
   position: Position.TOP,
 });
+
+interface RSSSourceMapping {
+  sourceId: string;
+  itemsPath: string;
+  fieldMappings: {
+    title: string;
+    description: string;
+    link: string;
+    pubDate?: string;
+    guid?: string;
+    author?: string;
+    category?: string;
+  };
+  enabled: boolean;
+}
 
 interface OutputFormatStepProps {
   config: APIEndpointConfig;
@@ -146,13 +163,408 @@ const JsonPathSelector: React.FC<{
   );
 };
 
-const FieldSelector: React.FC<{
+const RSSMultiSourceConfiguration: React.FC<{
+  config: any;
+  formatOptions: any;
+  updateFormatOption: (key: string, value: any) => void;
+  sampleData: Record<string, any>;
+  discoveredFields: Record<string, string[]>;
+  testAndDiscoverFields: (source: any) => void;
+  testingSource: string | null;
+}> = ({ 
+  config, 
+  formatOptions, 
+  updateFormatOption, 
+  sampleData,
+  discoveredFields,
+  testAndDiscoverFields,
+  testingSource 
+}) => {
+  // Initialize source mappings if not exists
+  const [sourceMappings, setSourceMappings] = useState<RSSSourceMapping[]>(() => {
+    // If we have saved mappings, use them
+    if (formatOptions.sourceMappings && formatOptions.sourceMappings.length > 0) {
+      // Ensure all current data sources are represented
+      const savedMappings = formatOptions.sourceMappings;
+      const mappingsBySourceId = new Map(
+        savedMappings.map(m => [m.sourceId, m])
+      );
+      
+      // Create mappings for all data sources, using saved data where available
+      return config.dataSources.map(source => {
+        const savedMapping = mappingsBySourceId.get(source.id);
+        
+        if (savedMapping) {
+          // Use the saved mapping
+          return savedMapping;
+        } else {
+          // Create a new empty mapping for this source
+          return {
+            sourceId: source.id,
+            itemsPath: '',
+            fieldMappings: {
+              title: '',
+              description: '',
+              link: '',
+              pubDate: '',
+              guid: '',
+              author: '',
+              category: ''
+            },
+            enabled: false
+          };
+        }
+      });
+    } else {
+      // No saved mappings, create empty ones for each data source
+      return config.dataSources.map(source => ({
+        sourceId: source.id,
+        itemsPath: '',
+        fieldMappings: {
+          title: '',
+          description: '',
+          link: '',
+          pubDate: '',
+          guid: '',
+          author: '',
+          category: ''
+        },
+        enabled: false
+      }));
+    }
+  });
+
+  const [expandedSources, setExpandedSources] = useState<Set<string>>(() => {
+    // Auto-expand enabled sources when loading
+    const enabled = new Set<string>();
+    sourceMappings.forEach(mapping => {
+      if (mapping.enabled) {
+        enabled.add(mapping.sourceId);
+      }
+    });
+    return enabled;
+  });
+  
+  // Update a specific source mapping
+  const updateSourceMapping = (sourceId: string, updates: Partial<RSSSourceMapping>) => {
+    const updated = sourceMappings.map(mapping => 
+      mapping.sourceId === sourceId 
+        ? { ...mapping, ...updates }
+        : mapping
+    );
+    setSourceMappings(updated);
+    
+    // Critical: Update the parent formatOptions
+    updateFormatOption('sourceMappings', updated);
+  };
+
+  // Update a field mapping for a specific source
+  const updateFieldMapping = (sourceId: string, field: string, value: string) => {
+    const updated = sourceMappings.map(mapping => 
+      mapping.sourceId === sourceId 
+        ? { 
+            ...mapping, 
+            fieldMappings: { 
+              ...mapping.fieldMappings, 
+              [field]: value 
+            }
+          }
+        : mapping
+    );
+    setSourceMappings(updated);
+    updateFormatOption('sourceMappings', updated);
+  };
+
+  // Toggle source expansion
+  const toggleSourceExpansion = (sourceId: string) => {
+    const newExpanded = new Set(expandedSources);
+    if (newExpanded.has(sourceId)) {
+      newExpanded.delete(sourceId);
+    } else {
+      newExpanded.add(sourceId);
+    }
+    setExpandedSources(newExpanded);
+  };
+
+  // Get enabled sources count
+  const enabledCount = sourceMappings.filter(m => m.enabled).length;
+
+  return (
+    <div>
+      {/* Channel Configuration - same as before */}
+      <Card style={{ marginBottom: 20 }}>
+        <h4>RSS Channel Settings</h4>
+        <FormGroup label="Channel Title" labelInfo="(required)">
+          <InputGroup
+            value={formatOptions.channelTitle}
+            onChange={(e) => updateFormatOption('channelTitle', e.target.value)}
+            placeholder="My API Feed"
+          />
+        </FormGroup>
+        <FormGroup label="Channel Description" labelInfo="(required)">
+          <TextArea
+            value={formatOptions.channelDescription}
+            onChange={(e) => updateFormatOption('channelDescription', e.target.value)}
+            placeholder="Description of your feed"
+            rows={2}
+          />
+        </FormGroup>
+        <FormGroup label="Channel Link" labelInfo="(required)">
+          <InputGroup
+            value={formatOptions.channelLink || ''}
+            onChange={(e) => updateFormatOption('channelLink', e.target.value)}
+            placeholder="https://example.com"
+          />
+        </FormGroup>
+      </Card>
+
+      {/* Multi-Source Configuration */}
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+          <h4>Data Sources for RSS Items</h4>
+          <Tag intent={enabledCount > 0 ? Intent.SUCCESS : Intent.WARNING}>
+            {enabledCount} of {config.dataSources.length} sources enabled
+          </Tag>
+        </div>
+
+        <Callout intent={Intent.PRIMARY} icon="info-sign" style={{ marginBottom: 15 }}>
+          Configure each data source that will contribute items to your RSS feed. 
+          You can combine multiple sources with the same or different schemas.
+        </Callout>
+
+        {config.dataSources.map((source, index) => {
+          const mapping = sourceMappings.find(m => m.sourceId === source.id) || sourceMappings[index];
+          const isExpanded = expandedSources.has(source.id);
+          const hasDiscoveredFields = discoveredFields[source.id] || source.fields?.length > 0;
+          
+          return (
+            <Card key={source.id} style={{ marginBottom: 10 }}>
+              {/* Source Header */}
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center',
+                marginBottom: isExpanded ? 15 : 0
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Switch
+                    checked={mapping.enabled}
+                    onChange={(e) => updateSourceMapping(source.id, { enabled: e.target.checked })}
+                    label={
+                      <span>
+                        <strong>{source.name}</strong>
+                        <Tag minimal style={{ marginLeft: 8 }}>{source.type}</Tag>
+                        {mapping.enabled && mapping.itemsPath && (
+                          <Tag minimal intent={Intent.SUCCESS} style={{ marginLeft: 4 }}>
+                            Configured
+                          </Tag>
+                        )}
+                      </span>
+                    }
+                  />
+                </div>
+                <Button
+                  minimal
+                  icon={isExpanded ? "chevron-up" : "chevron-down"}
+                  onClick={() => toggleSourceExpansion(source.id)}
+                  disabled={!mapping.enabled}
+                />
+              </div>
+
+              {/* Expanded Configuration */}
+              {isExpanded && mapping.enabled && (
+                <div style={{ marginTop: 15 }}>
+                  {/* Test Data Source */}
+                  {!hasDiscoveredFields ? (
+                    <Callout intent={Intent.WARNING} icon="info-sign" style={{ marginBottom: 15 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <strong>Field discovery needed</strong>
+                          <p style={{ margin: 0 }}>Test this data source to discover available fields.</p>
+                        </div>
+                        <Button
+                          intent={Intent.PRIMARY}
+                          loading={testingSource === source.id}
+                          onClick={() => testAndDiscoverFields(source)}
+                          icon="search"
+                          text="Test & Discover"
+                        />
+                      </div>
+                    </Callout>
+                  ) : (
+                    <>
+                      {/* Items Path Selection */}
+                      {sampleData[source.id] && (
+                        <FormGroup label="Select array containing items" labelInfo="(required)">
+                          <JsonPathSelector
+                            data={sampleData[source.id]}
+                            onSelectItemsPath={(path) => updateSourceMapping(source.id, { itemsPath: path })}
+                            selectedItemsPath={mapping.itemsPath}
+                          />
+                        </FormGroup>
+                      )}
+
+                      {/* Field Mappings */}
+                      {mapping.itemsPath && (
+                        <div style={{ marginTop: 20 }}>
+                          <h5>Field Mappings for {source.name}</h5>
+                          
+                          <FormGroup label="Title Field" labelInfo="(required)">
+                            <SingleSourceFieldSelector
+                              sourcePath={mapping.itemsPath}
+                              sourceId={source.id}
+                              sampleData={sampleData[source.id]}
+                              value={mapping.fieldMappings.title}
+                              onChange={(value) => updateFieldMapping(source.id, 'title', value)}
+                              placeholder="Select title field..."
+                            />
+                          </FormGroup>
+
+                          <FormGroup label="Description Field" labelInfo="(required)">
+                            <SingleSourceFieldSelector
+                              sourcePath={mapping.itemsPath}
+                              sourceId={source.id}
+                              sampleData={sampleData[source.id]}
+                              value={mapping.fieldMappings.description}
+                              onChange={(value) => updateFieldMapping(source.id, 'description', value)}
+                              placeholder="Select description field..."
+                            />
+                          </FormGroup>
+
+                          <FormGroup label="Link Field" labelInfo="(required)">
+                            <SingleSourceFieldSelector
+                              sourcePath={mapping.itemsPath}
+                              sourceId={source.id}
+                              sampleData={sampleData[source.id]}
+                              value={mapping.fieldMappings.link}
+                              onChange={(value) => updateFieldMapping(source.id, 'link', value)}
+                              placeholder="Select link field..."
+                            />
+                          </FormGroup>
+
+                          <FormGroup label="Publication Date Field">
+                            <SingleSourceFieldSelector
+                              sourcePath={mapping.itemsPath}
+                              sourceId={source.id}
+                              sampleData={sampleData[source.id]}
+                              value={mapping.fieldMappings.pubDate}
+                              onChange={(value) => updateFieldMapping(source.id, 'pubDate', value)}
+                              placeholder="Select date field (optional)..."
+                            />
+                          </FormGroup>
+
+                          <FormGroup label="GUID Field">
+                            <SingleSourceFieldSelector
+                              sourcePath={mapping.itemsPath}
+                              sourceId={source.id}
+                              sampleData={sampleData[source.id]}
+                              value={mapping.fieldMappings.guid}
+                              onChange={(value) => updateFieldMapping(source.id, 'guid', value)}
+                              placeholder="Select unique ID field (optional)..."
+                            />
+                          </FormGroup>
+
+                          <FormGroup label="Author Field">
+                            <SingleSourceFieldSelector
+                              sourcePath={mapping.itemsPath}
+                              sourceId={source.id}
+                              sampleData={sampleData[source.id]}
+                              value={mapping.fieldMappings.author}
+                              onChange={(value) => updateFieldMapping(source.id, 'author', value)}
+                              placeholder="Select author field (optional)..."
+                            />
+                          </FormGroup>
+
+                          <FormGroup label="Category Field">
+                            <SingleSourceFieldSelector
+                              sourcePath={mapping.itemsPath}
+                              sourceId={source.id}
+                              sampleData={sampleData[source.id]}
+                              value={mapping.fieldMappings.category}
+                              onChange={(value) => updateFieldMapping(source.id, 'category', value)}
+                              placeholder="Select category field (optional)..."
+                            />
+                          </FormGroup>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </Card>
+          );
+        })}
+      </Card>
+
+      {/* Merge Strategy */}
+      {enabledCount > 1 && (
+        <Card style={{ marginBottom: 20 }}>
+          <h4>Merge Strategy</h4>
+          <FormGroup label="How should items from multiple sources be combined?">
+            <RadioGroup
+              selectedValue={formatOptions.mergeStrategy || 'sequential'}
+              onChange={(e) => updateFormatOption('mergeStrategy', e.currentTarget.value)}
+            >
+              <Radio value="sequential" label="Sequential - Append sources one after another" />
+              <Radio value="chronological" label="Chronological - Sort by date field (requires pubDate)" />
+              <Radio value="interleaved" label="Interleaved - Alternate between sources" />
+              <Radio value="priority" label="Priority - Order by source order above" />
+            </RadioGroup>
+          </FormGroup>
+
+          {formatOptions.mergeStrategy === 'chronological' && (
+            <Callout intent={Intent.WARNING} icon="warning-sign">
+              Make sure all enabled sources have a publication date field mapped for proper chronological sorting.
+            </Callout>
+          )}
+
+          <FormGroup label="Maximum Items Per Source" helperText="Limit the number of items from each source (0 = unlimited)">
+            <NumericInput
+              value={formatOptions.maxItemsPerSource || 0}
+              onValueChange={(value) => updateFormatOption('maxItemsPerSource', value)}
+              min={0}
+              placeholder="0"
+            />
+          </FormGroup>
+
+          <FormGroup label="Total Maximum Items" helperText="Limit the total number of items in the feed (0 = unlimited)">
+            <NumericInput
+              value={formatOptions.maxTotalItems || 0}
+              onValueChange={(value) => updateFormatOption('maxTotalItems', value)}
+              min={0}
+              placeholder="0"
+            />
+          </FormGroup>
+        </Card>
+      )}
+
+      {/* Preview */}
+      {enabledCount > 0 && (
+        <MultiSourceRSSPreview
+          sourceMappings={sourceMappings.filter(m => m.enabled)}
+          sampleData={sampleData}
+          channelInfo={{
+            title: formatOptions.channelTitle,
+            description: formatOptions.channelDescription,
+            link: formatOptions.channelLink
+          }}
+          mergeStrategy={formatOptions.mergeStrategy || 'sequential'}
+          dataSources={config.dataSources}
+        />
+      )}
+    </div>
+  );
+};
+
+// Helper component for single-source field selection
+const SingleSourceFieldSelector: React.FC<{
   sourcePath: string;
+  sourceId: string;
   sampleData: any;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
-}> = ({ sourcePath, sampleData, value, onChange, placeholder }) => {
+}> = ({ sourcePath, sourceId, sampleData, value, onChange, placeholder }) => {
   // Get sample item from the selected path
   const getSampleItem = () => {
     const parts = sourcePath.split('.');
@@ -199,68 +611,78 @@ const FieldSelector: React.FC<{
   );
 };
 
-const RssMappingPreview: React.FC<{
-  sampleData: any;
-  itemsPath: string;
-  fieldMappings: {
-    title?: string;
-    description?: string;
-    link?: string;
-    pubDate?: string;
-    guid?: string;
-    author?: string;
-    category?: string;
-  };
-  channelInfo: {  // Add this prop type
-    title: string;
-    description: string;
-    link: string;
-  };
-}> = ({ sampleData, itemsPath, fieldMappings, channelInfo }) => {  // Add channelInfo to props
-  // Helper function to get value from a path like "data.items" or "author.name"
-  const getValueFromPath = (obj: any, path: string): any => {
-    if (!path || !obj) return null;
-    
-    const parts = path.split('.');
-    let current = obj;
-    
-    for (const part of parts) {
-      if (current === null || current === undefined) return null;
-      current = current[part];
-    }
-    
-    return current;
-  };
-
-  // Get the items array from the sample data
-  const items = getValueFromPath(sampleData, itemsPath);
+// Helper function for getting values from paths
+const getValueFromPath = (obj: any, path: string): any => {
+  if (!path || !obj) return null;
   
-  if (!items || !Array.isArray(items) || items.length === 0) {
-    return (
-      <Callout intent="warning" icon="warning-sign" style={{ marginTop: 20 }}>
-        No items found at path: <code>{itemsPath}</code>
-      </Callout>
-    );
+  const parts = path.split('.');
+  let current = obj;
+  
+  for (const part of parts) {
+    if (current === null || current === undefined) return null;
+    current = current[part];
   }
-
-  // Get the first item as a sample
-  const sampleItem = items[0];
   
-  // Get field values
-  const getFieldValue = (fieldPath?: string): string => {
-    if (!fieldPath) return '[Not mapped]';
-    const value = getValueFromPath(sampleItem, fieldPath);
-    if (value === null || value === undefined) return '[No value]';
-    if (typeof value === 'object') return '[Object]';
-    if (Array.isArray(value)) return value.join(', ');
-    return String(value);
-  };
+  return current;
+};
+
+// Multi-source RSS preview component
+const MultiSourceRSSPreview: React.FC<{
+  sourceMappings: RSSSourceMapping[];
+  sampleData: any;
+  channelInfo: any;
+  mergeStrategy: string;
+  dataSources: any[];
+}> = ({ sourceMappings, sampleData, channelInfo, mergeStrategy, dataSources }) => {
+  // Collect all items from all enabled sources
+  const allItems = [];
+  
+  sourceMappings.forEach(mapping => {
+    const sourceData = sampleData[mapping.sourceId];
+    if (!sourceData || !mapping.itemsPath) return;
+    
+    // Get items array
+    const items = getValueFromPath(sourceData, mapping.itemsPath);
+    if (!Array.isArray(items)) return;
+    
+    // Get source name for display
+    const sourceName = dataSources.find(ds => ds.id === mapping.sourceId)?.name || 'Unknown';
+    
+    // Take first item as example
+    if (items.length > 0) {
+      const item = items[0];
+      allItems.push({
+        source: sourceName,
+        title: getValueFromPath(item, mapping.fieldMappings.title) || '[No title]',
+        description: getValueFromPath(item, mapping.fieldMappings.description) || '[No description]',
+        link: getValueFromPath(item, mapping.fieldMappings.link) || '[No link]',
+        pubDate: mapping.fieldMappings.pubDate ? getValueFromPath(item, mapping.fieldMappings.pubDate) : null,
+        itemCount: items.length
+      });
+    }
+  });
 
   return (
-    <div style={{ marginTop: 20 }}>
-      <h5>RSS Feed Preview</h5>
-      <Card style={{ backgroundColor: '#f5f8fa', padding: 15, fontFamily: 'monospace', fontSize: 12 }}>
-        <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+    <Card style={{ marginBottom: 20 }}>
+      <h4>RSS Feed Preview</h4>
+      
+      {/* Summary */}
+      <Callout intent={Intent.SUCCESS} icon="tick" style={{ marginBottom: 15 }}>
+        <strong>Feed Summary:</strong>
+        <ul style={{ marginBottom: 0 }}>
+          {allItems.map((item, idx) => (
+            <li key={idx}>
+              {item.source}: {item.itemCount} items
+            </li>
+          ))}
+          <li><strong>Total: {allItems.reduce((sum, item) => sum + item.itemCount, 0)} items</strong></li>
+          <li>Merge Strategy: {mergeStrategy}</li>
+        </ul>
+      </Callout>
+      
+      {/* XML Preview */}
+      <div style={{ backgroundColor: '#f5f8fa', padding: 15, borderRadius: 3 }}>
+        <pre style={{ margin: 0, fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}>
 {`<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
   <channel>
@@ -268,25 +690,21 @@ const RssMappingPreview: React.FC<{
     <description>${channelInfo.description || '[Channel Description]'}</description>
     <link>${channelInfo.link || '[Channel Link]'}</link>
     
-    <!-- First item from ${items.length} total items -->
+    <!-- Items from ${sourceMappings.length} sources (${mergeStrategy} merge) -->
+${allItems.map((item, idx) => `    
+    <!-- Item ${idx + 1} from ${item.source} -->
     <item>
-      <title>${getFieldValue(fieldMappings.title)}</title>
-      <description>${getFieldValue(fieldMappings.description)}</description>
-      <link>${getFieldValue(fieldMappings.link)}</link>${fieldMappings.pubDate ? `
-      <pubDate>${getFieldValue(fieldMappings.pubDate)}</pubDate>` : ''}${fieldMappings.guid ? `
-      <guid>${getFieldValue(fieldMappings.guid)}</guid>` : ''}${fieldMappings.author ? `
-      <author>${getFieldValue(fieldMappings.author)}</author>` : ''}${fieldMappings.category ? `
-      <category>${getFieldValue(fieldMappings.category)}</category>` : ''}
-    </item>
+      <title>${item.title}</title>
+      <description>${item.description}</description>
+      <link>${item.link}</link>${item.pubDate ? `
+      <pubDate>${item.pubDate}</pubDate>` : ''}
+      <source url="${channelInfo.link}">${item.source}</source>
+    </item>`).join('\n')}
   </channel>
 </rss>`}
         </pre>
-      </Card>
-      
-      <Callout intent="success" icon="tick" style={{ marginTop: 10 }}>
-        This preview shows the first item from {items.length} total items found at <code>{itemsPath}</code>
-      </Callout>
-    </div>
+      </div>
+    </Card>
   );
 };
 
@@ -300,17 +718,35 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
   const [testingSource, setTestingSource] = useState<string | null>(null);
   const [discoveredFields, setDiscoveredFields] = useState<Record<string, string[]>>({});
   const [format, setFormat] = useState(config.outputFormat || 'json');
-  const [formatOptions, setFormatOptions] = useState<any>({
-    prettyPrint: true,
-    includeMetadata: true,
-    rootWrapper: 'data',
-    channelLink: getDefaultChannelLink(),
-    ...config.outputSchema?.metadata
+  const [formatOptions, setFormatOptions] = useState<any>(() => {
+    const savedMetadata = config.outputSchema?.metadata || {};
+    
+    return {
+      prettyPrint: true,
+      includeMetadata: true,
+      rootWrapper: 'data',
+      channelLink: getDefaultChannelLink(),
+      ...savedMetadata,  // This includes sourceMappings if they exist
+      // Ensure sourceMappings is always an array
+      sourceMappings: savedMetadata.sourceMappings || []
+    };
   });
-  const [selectedDataSource, setSelectedDataSource] = useState<string>(
-    formatOptions.sourceId || ''
-  );
+  const [selectedDataSource, setSelectedDataSource] = useState<string>('');
   const [sampleData, setSampleData] = useState<Record<string, any>>({});
+  const [selectedTab, setSelectedTab] = useState('format');
+  const [enhancedMappings, setEnhancedMappings] = useState(() => {
+    // If you have existing simple mappings, convert them
+    if (config.fieldMappings && config.fieldMappings.length > 0) {
+      return config.fieldMappings.map(mapping => ({
+        outputField: mapping.target_field || mapping.outputField,
+        sourceId: mapping.source_id || config.dataSources[0]?.id,
+        sourceField: mapping.source_field || mapping.sourceField,
+        transform: mapping.transform_type || 'direct',
+        aggregation: 'first' as const
+      }));
+    }
+    return [];
+  });
   
   const { fetchViaProxy } = useFetchProxy();
 
@@ -541,6 +977,13 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
     }
   };
 
+  const handleMappingsUpdate = (newMappings: any[]) => {
+    setEnhancedMappings(newMappings);
+    onUpdate({
+      fieldMappings: newMappings
+    });
+  };
+
   const handleFormatChange = (newFormat: typeof format) => {
     setFormat(newFormat);
     onUpdate({ 
@@ -555,13 +998,17 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
   const updateFormatOption = (key: string, value: any) => {
     const updated = { ...formatOptions, [key]: value };
     setFormatOptions(updated);
+    
+    // Make sure to update the parent config
     onUpdate({
       outputSchema: {
         ...config.outputSchema,
-        metadata: updated
+        metadata: updated,  // This includes sourceMappings
+        format: format
       }
     });
   };
+  
 
   const getAllFields = () => {
     const fields: string[] = [];
@@ -866,223 +1313,15 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
         )}
 
         {format === 'rss' && (
-          <>
-            {/* Channel Configuration */}
-            <Card style={{ marginBottom: 20 }}>
-              <h4>RSS Channel Settings</h4>
-              
-              <FormGroup label="Channel Title" labelInfo="(required)">
-                <InputGroup
-                  value={formatOptions.channelTitle}
-                  onChange={(e) => updateFormatOption('channelTitle', e.target.value)}
-                  placeholder="My API Feed"
-                />
-              </FormGroup>
-
-              <FormGroup label="Channel Description" labelInfo="(required)">
-                <TextArea
-                  value={formatOptions.channelDescription}
-                  onChange={(e) => updateFormatOption('channelDescription', e.target.value)}
-                  placeholder="Description of your feed"
-                  rows={2}
-                />
-              </FormGroup>
-
-              <FormGroup 
-                label="Channel Link" 
-                labelInfo="(auto-generated)"
-                helperText="The homepage URL for this RSS feed"
-              >
-                <InputGroup
-                  value={formatOptions.channelLink || getDefaultChannelLink()}
-                  onChange={(e) => updateFormatOption('channelLink', e.target.value)}
-                  placeholder="https://example.com"
-                  disabled={false} // Set to true if you want it read-only
-                  leftIcon="link"
-                  rightElement={
-                    <Button
-                      minimal
-                      icon="refresh"
-                      title="Reset to default"
-                      onClick={() => updateFormatOption('channelLink', getDefaultChannelLink())}
-                    />
-                  }
-                />
-              </FormGroup>
-            </Card>
-
-            {/* Data Source Selection and Field Discovery */}
-            <Card style={{ marginBottom: 20 }}>
-              <h4>Data Source & Field Mapping</h4>
-              
-              {config.dataSources.length === 0 ? (
-                <Callout intent="warning" icon="warning-sign">
-                  No data sources selected. Please go back and select at least one data source.
-                </Callout>
-              ) : (
-                <>
-                  <FormGroup label="Select Data Source for RSS Items">
-                    <HTMLSelect
-                      value={selectedDataSource || ''}
-                      onChange={(e) => {
-                        setSelectedDataSource(e.target.value);
-                        // Reset field mappings when changing source
-                        updateFormatOption('sourceId', e.target.value);
-                        updateFormatOption('itemsPath', '');
-                        updateFormatOption('fieldMappings', {});
-                      }}
-                      fill
-                    >
-                      <option value="">-- Select a data source --</option>
-                      {config.dataSources.map(source => (
-                        <option key={source.id} value={source.id}>
-                          {source.name} ({source.type})
-                        </option>
-                      ))}
-                    </HTMLSelect>
-                  </FormGroup>
-
-                  {selectedDataSource && (
-                    <div style={{ marginTop: 15 }}>
-                      {!discoveredFields[selectedDataSource] ? (
-                        <Callout intent="warning" icon="info-sign">
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div>
-                              <strong>Field discovery needed</strong>
-                              <p style={{ margin: 0 }}>Click analyze to discover available fields in this data source.</p>
-                            </div>
-                            <Button
-                              intent="primary"
-                              loading={testingSource === selectedDataSource}
-                              onClick={() => testAndDiscoverFields(
-                                config.dataSources.find(s => s.id === selectedDataSource)!
-                              )}
-                              icon="search"
-                              text="Analyze"
-                            />
-                          </div>
-                        </Callout>
-                      ) : (
-                        <>
-                          {/* Show sample data structure if available */}
-                          {sampleData[selectedDataSource] && (
-                            <JsonPathSelector
-                              data={sampleData[selectedDataSource]}
-                              onSelectItemsPath={(path) => updateFormatOption('itemsPath', path)}
-                              selectedItemsPath={formatOptions.itemsPath || ''}
-                            />
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-            </Card>
-
-            {/* Field Mapping */}
-            {selectedDataSource && formatOptions.itemsPath && (
-              <Card style={{ marginBottom: 20 }}>
-                <h4>RSS Field Mapping</h4>
-                <p className={Classes.TEXT_MUTED}>
-                  Map fields from your data to RSS elements. 
-                  Items will be extracted from: <Tag intent="primary">{formatOptions.itemsPath}</Tag>
-                </p>
-
-                <FormGroup label="Title Field" labelInfo="(required)">
-                  <FieldSelector
-                    sourcePath={formatOptions.itemsPath}
-                    sampleData={sampleData[selectedDataSource]}
-                    value={formatOptions.titleField || ''}
-                    onChange={(value) => updateFormatOption('titleField', value)}
-                    placeholder="Select or type field path..."
-                  />
-                </FormGroup>
-
-                <FormGroup label="Description Field" labelInfo="(required)">
-                  <FieldSelector
-                    sourcePath={formatOptions.itemsPath}
-                    sampleData={sampleData[selectedDataSource]}
-                    value={formatOptions.descriptionField || ''}
-                    onChange={(value) => updateFormatOption('descriptionField', value)}
-                    placeholder="Select or type field path..."
-                  />
-                </FormGroup>
-
-                <FormGroup label="Link Field" labelInfo="(required)">
-                  <FieldSelector
-                    sourcePath={formatOptions.itemsPath}
-                    sampleData={sampleData[selectedDataSource]}
-                    value={formatOptions.linkField || ''}
-                    onChange={(value) => updateFormatOption('linkField', value)}
-                    placeholder="Select or type field path..."
-                  />
-                </FormGroup>
-
-                <FormGroup label="Publication Date Field">
-                  <FieldSelector
-                    sourcePath={formatOptions.itemsPath}
-                    sampleData={sampleData[selectedDataSource]}
-                    value={formatOptions.pubDateField || ''}
-                    onChange={(value) => updateFormatOption('pubDateField', value)}
-                    placeholder="Select or type field path..."
-                  />
-                </FormGroup>
-
-                <FormGroup label="GUID Field" helperText="Unique identifier for each item">
-                  <FieldSelector
-                    sourcePath={formatOptions.itemsPath}
-                    sampleData={sampleData[selectedDataSource]}
-                    value={formatOptions.guidField || ''}
-                    onChange={(value) => updateFormatOption('guidField', value)}
-                    placeholder="Select or type field path..."
-                  />
-                </FormGroup>
-
-                <FormGroup label="Author Field">
-                  <FieldSelector
-                    sourcePath={formatOptions.itemsPath}
-                    sampleData={sampleData[selectedDataSource]}
-                    value={formatOptions.authorField || ''}
-                    onChange={(value) => updateFormatOption('authorField', value)}
-                    placeholder="Select or type field path..."
-                  />
-                </FormGroup>
-
-                <FormGroup label="Category Field">
-                  <FieldSelector
-                    sourcePath={formatOptions.itemsPath}
-                    sampleData={sampleData[selectedDataSource]}
-                    value={formatOptions.categoryField || ''}
-                    onChange={(value) => updateFormatOption('categoryField', value)}
-                    placeholder="Select or type field path..."
-                  />
-                </FormGroup>
-
-                {/* Preview Section */}
-                {sampleData[selectedDataSource] && (
-                  <RssMappingPreview
-                    sampleData={sampleData[selectedDataSource]}
-                    itemsPath={formatOptions.itemsPath}
-                    channelInfo={{  // Add this prop
-                      title: formatOptions.channelTitle || '',
-                      description: formatOptions.channelDescription || '',
-                      link: formatOptions.channelLink || ''
-                    }}
-                    fieldMappings={{
-                      title: formatOptions.titleField,
-                      description: formatOptions.descriptionField,
-                      link: formatOptions.linkField,
-                      pubDate: formatOptions.pubDateField,
-                      guid: formatOptions.guidField,
-                      author: formatOptions.authorField,
-                      category: formatOptions.categoryField
-                    }}
-                  />
-                )}
-              </Card>
-            )}
-          </>
+          <RSSMultiSourceConfiguration
+            config={config}
+            formatOptions={formatOptions}
+            updateFormatOption={updateFormatOption}
+            sampleData={sampleData}
+            discoveredFields={discoveredFields}
+            testAndDiscoverFields={testAndDiscoverFields}
+            testingSource={testingSource}
+          />
         )}
 
         {format === 'atom' && (
