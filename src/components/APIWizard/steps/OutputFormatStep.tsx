@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Card,
   Icon,
@@ -26,6 +26,7 @@ import { DataSource } from '../../../types/datasource.types';
 import { useFetchProxy } from '../../../hooks/useFetchProxy';
 import { JsonPathExplorer } from '../../JsonPathExplorer/JsonPathExplorer';
 import MultiSourceFieldMapper from '../../MultiSourceFieldMapper';
+import { JsonFieldMapper } from '../../JsonFieldMapper';
 
 // Helper to extract field paths
 function extractFieldPaths(obj: any, prefix = ''): Array<{ path: string; display: string }> {
@@ -747,6 +748,8 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
     }
     return [];
   });
+  const [jsonConfigMode, setJsonConfigMode] = useState<'simple' | 'advanced'>('simple');
+  const isInitialMount = useRef(true);
   
   const { fetchViaProxy } = useFetchProxy();
 
@@ -1242,44 +1245,421 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
         
         {format === 'json' && (
           <>
-            <FormGroup label="Root Wrapper Field">
-              <InputGroup
-                value={formatOptions.rootWrapper}
-                onChange={(e) => updateFormatOption('rootWrapper', e.target.value)}
-                placeholder="e.g., data, results, items"
-              />
-            </FormGroup>
-
-            <Switch
-              label="Pretty print (formatted output)"
-              checked={formatOptions.prettyPrint}
-              onChange={(e) => updateFormatOption('prettyPrint', e.target.checked)}
-            />
-
-            <Switch
-              label="Include metadata (pagination, timestamps)"
-              checked={formatOptions.includeMetadata}
-              onChange={(e) => updateFormatOption('includeMetadata', e.target.checked)}
-            />
-
-            <Switch
-              label="Include null values"
-              checked={formatOptions.includeNulls}
-              onChange={(e) => updateFormatOption('includeNulls', e.target.checked)}
-            />
-
-            <FormGroup label="Date Format">
-              <HTMLSelect
-                value={formatOptions.dateFormat || 'ISO'}
-                onChange={(e) => updateFormatOption('dateFormat', e.target.value)}
+            {/* Configuration Mode Selection */}
+            <FormGroup 
+              label="Configuration Mode" 
+              helperText="Choose between simple options or advanced field-by-field mapping"
+            >
+              <RadioGroup
+                selectedValue={jsonConfigMode}
+                onChange={(e) => setJsonConfigMode(e.currentTarget.value as 'simple' | 'advanced')}
               >
-                <option value="ISO">ISO 8601 (2024-01-01T12:00:00Z)</option>
-                <option value="unix">Unix Timestamp (1704106800)</option>
-                <option value="custom">Custom Format</option>
-              </HTMLSelect>
+                <Radio 
+                  label={
+                    <span>
+                      <strong>Simple Configuration</strong>
+                      <br />
+                      <small className={Classes.TEXT_MUTED}>
+                        Basic JSON output with formatting options
+                      </small>
+                    </span>
+                  }
+                  value="simple"
+                />
+                <Radio 
+                  label={
+                    <span>
+                      <strong>Advanced Field Mapping</strong>
+                      <br />
+                      <small className={Classes.TEXT_MUTED}>
+                        Visual field mapping with transformations, conditions, and custom output structure
+                      </small>
+                    </span>
+                  }
+                  value="advanced"
+                />
+              </RadioGroup>
             </FormGroup>
+
+            <Divider style={{ margin: '20px 0' }} />
+
+            {/* Simple Configuration Mode */}
+            {jsonConfigMode === 'simple' ? (
+              <div className="simple-json-config">
+                <Callout intent={Intent.PRIMARY} icon="info-sign" style={{ marginBottom: 20 }}>
+                  Configure basic JSON output settings. Your data sources will be combined into a single JSON response.
+                </Callout>
+
+                {/* Pretty Print Option */}
+                <FormGroup>
+                  <Switch
+                    label="Pretty print (formatted output)"
+                    checked={formatOptions.prettyPrint !== false}
+                    onChange={(e) => updateFormatOption('prettyPrint', e.target.checked)}
+                  />
+                </FormGroup>
+
+                {/* Include Metadata Option */}
+                <FormGroup>
+                  <Switch
+                    label="Include response metadata"
+                    checked={formatOptions.includeMetadata}
+                    onChange={(e) => updateFormatOption('includeMetadata', e.target.checked)}
+                    helperText="Adds timestamp, version, and source information to the response"
+                  />
+                </FormGroup>
+
+                {/* Root Wrapper Element */}
+                <FormGroup 
+                  label="Root wrapper element"
+                  helperText="The top-level key that will contain your data"
+                >
+                  <InputGroup
+                    value={formatOptions.rootWrapper || 'data'}
+                    onChange={(e) => updateFormatOption('rootWrapper', e.target.value)}
+                    placeholder="e.g., data, response, items, results"
+                  />
+                </FormGroup>
+
+                {/* Select Primary Data Source */}
+                {config.dataSources.length > 0 && (
+                  <>
+                    <FormGroup 
+                      label="Primary Data Source"
+                      helperText="Select which data source to use as the main response body"
+                      labelInfo="(required)"
+                    >
+                      <HTMLSelect
+                        value={selectedDataSource || formatOptions.sourceId || ''}
+                        onChange={(e) => {
+                          setSelectedDataSource(e.target.value);
+                          updateFormatOption('sourceId', e.target.value);
+                        }}
+                        fill
+                      >
+                        <option value="">Select a data source...</option>
+                        {config.dataSources.map(source => (
+                          <option key={source.id} value={source.id}>
+                            {source.name} ({source.type})
+                          </option>
+                        ))}
+                      </HTMLSelect>
+                    </FormGroup>
+
+                    {/* Test Data Source Button */}
+                    {selectedDataSource && (
+                      <Button
+                        icon="play"
+                        text="Test Data Source"
+                        intent={Intent.PRIMARY}
+                        onClick={() => testAndDiscoverFields(
+                          config.dataSources.find(ds => ds.id === selectedDataSource)!
+                        )}
+                        loading={testingSource === selectedDataSource}
+                        style={{ marginBottom: 20 }}
+                      />
+                    )}
+                  </>
+                )}
+
+                {/* Response Structure Preview */}
+                {selectedDataSource && sampleData[selectedDataSource] && (
+                  <FormGroup label="Response Structure Preview">
+                    <Card style={{ backgroundColor: '#f5f8fa', padding: 15 }}>
+                      <pre style={{ margin: 0, fontSize: 12, overflow: 'auto', maxHeight: 200 }}>
+                        {JSON.stringify(
+                          {
+                            ...(formatOptions.includeMetadata && {
+                              metadata: {
+                                timestamp: new Date().toISOString(),
+                                version: "1.0",
+                                source: selectedDataSource
+                              }
+                            }),
+                            [formatOptions.rootWrapper || 'data']: Array.isArray(sampleData[selectedDataSource]) 
+                              ? `[${sampleData[selectedDataSource].length} items...]`
+                              : '{...}'
+                          },
+                          null,
+                          2
+                        )}
+                      </pre>
+                    </Card>
+                  </FormGroup>
+                )}
+
+                {/* Additional Options */}
+                <FormGroup label="Additional Options">
+                  <Switch
+                    label="Include null values"
+                    checked={formatOptions.includeNulls !== false}
+                    onChange={(e) => updateFormatOption('includeNulls', e.target.checked)}
+                  />
+                  <Switch
+                    label="Sort object keys alphabetically"
+                    checked={formatOptions.sortKeys}
+                    onChange={(e) => updateFormatOption('sortKeys', e.target.checked)}
+                  />
+                  <Switch
+                    label="Convert dates to ISO strings"
+                    checked={formatOptions.isoDates !== false}
+                    onChange={(e) => updateFormatOption('isoDates', e.target.checked)}
+                  />
+                </FormGroup>
+
+                {/* Character Encoding */}
+                <FormGroup label="Character Encoding">
+                  <HTMLSelect
+                    value={formatOptions.encoding || 'UTF-8'}
+                    onChange={(e) => updateFormatOption('encoding', e.target.value)}
+                    fill
+                  >
+                    <option value="UTF-8">UTF-8 (Default)</option>
+                    <option value="UTF-16">UTF-16</option>
+                    <option value="ASCII">ASCII</option>
+                  </HTMLSelect>
+                </FormGroup>
+              </div>
+            ) : (
+              /* Advanced Configuration Mode - JsonFieldMapper */
+              <div className="advanced-json-config">
+                {config.dataSources.length === 0 ? (
+                  /* No Data Sources Warning */
+                  <NonIdealState
+                    icon="data-connection"
+                    title="No Data Sources Available"
+                    description="You need to configure at least one data source before setting up field mappings."
+                    action={
+                      <Button 
+                        text="Configure Data Sources" 
+                        intent={Intent.PRIMARY}
+                        icon="arrow-left"
+                        onClick={() => {
+                          // This should navigate back to the data sources step
+                          // Implementation depends on your wizard navigation
+                          console.log('Navigate to data sources step');
+                        }}
+                      />
+                    }
+                  />
+                ) : !Object.keys(sampleData).length ? (
+                  /* No Sample Data Warning */
+                  <Callout intent={Intent.WARNING} icon="warning-sign">
+                    <h4>Sample Data Required</h4>
+                    <p>
+                      Please test your data sources to load sample data before configuring field mappings.
+                      Sample data helps you visualize the available fields and test your transformations.
+                    </p>
+                    <div style={{ marginTop: 15 }}>
+                      {config.dataSources.map(source => (
+                        <Button
+                          key={source.id}
+                          text={`Test ${source.name}`}
+                          icon="play"
+                          intent={Intent.PRIMARY}
+                          onClick={() => testAndDiscoverFields(source)}
+                          loading={testingSource === source.id}
+                          style={{ marginRight: 10, marginBottom: 10 }}
+                        />
+                      ))}
+                    </div>
+                  </Callout>
+                ) : (
+                  /* JsonFieldMapper Component */
+                  <>
+                    <Callout intent={Intent.PRIMARY} icon="info-sign" style={{ marginBottom: 20 }}>
+                      <strong>Advanced Field Mapping</strong>
+                      <p style={{ margin: '5px 0 0 0' }}>
+                        Create a custom JSON structure by mapping fields from your data sources. 
+                        Add transformations, conditions, and define exactly how your output should look.
+                      </p>
+                    </Callout>
+
+                    <JsonFieldMapper
+                      dataSources={config.dataSources}
+                      sampleData={sampleData}
+                      initialConfig={formatOptions.jsonMappingConfig}
+                      onChange={(mappingConfig) => {
+                        updateFormatOption('jsonMappingConfig', mappingConfig);
+                        
+                        // Only show toast after initial mount
+                        if (!isInitialMount.current) {
+                          AppToaster.show({
+                            message: 'Mapping configuration updated',
+                            intent: Intent.SUCCESS,
+                            timeout: 2000
+                          });
+                        } else {
+                          isInitialMount.current = false;
+                        }
+                      }}
+                      onTest={async () => {
+                        console.log('Testing JSON mapping configuration...');
+                        
+                        try {
+                          // Validate configuration first
+                          if (!formatOptions.jsonMappingConfig) {
+                            throw new Error('No mapping configuration to test');
+                          }
+
+                          // Show loading state
+                          AppToaster.show({
+                            message: 'Testing mapping configuration...',
+                            intent: Intent.NONE,
+                            timeout: 0,
+                            icon: <Spinner size={16} />
+                          });
+
+                          // Import the mapping helper
+                          const { applyMappingToData, validateMappingConfig } = 
+                            await import('../../JsonFieldMapper/utils/mappingHelpers');
+
+                          // Validate the configuration
+                          const validation = validateMappingConfig(formatOptions.jsonMappingConfig);
+                          if (!validation.valid) {
+                            throw new Error(`Configuration errors: ${validation.errors.join(', ')}`);
+                          }
+
+                          // Get the source data
+                          const sourceId = formatOptions.jsonMappingConfig.sourceSelection?.sources[0]?.id;
+                          if (!sourceId || !sampleData[sourceId]) {
+                            throw new Error('No sample data available for the selected source');
+                          }
+
+                          // Apply the mapping to sample data
+                          const testResult = applyMappingToData(
+                            { [sourceId]: sampleData[sourceId] },
+                            formatOptions.jsonMappingConfig
+                          );
+
+                          // Clear loading toast
+                          AppToaster.clear();
+
+                          // Show success with preview
+                          AppToaster.show({
+                            message: (
+                              <div>
+                                <strong>Test Successful!</strong>
+                                <br />
+                                <small>Output: {JSON.stringify(testResult).substring(0, 100)}...</small>
+                              </div>
+                            ),
+                            intent: Intent.SUCCESS,
+                            timeout: 5000
+                          });
+
+                          // Log full result for debugging
+                          console.log('Test Result:', testResult);
+
+                          // Optionally open a modal with full preview
+                          // setPreviewModalData(testResult);
+                          // setShowPreviewModal(true);
+
+                        } catch (error) {
+                          console.error('Mapping test failed:', error);
+                          
+                          // Clear any loading toasts
+                          AppToaster.clear();
+                          
+                          // Show error toast
+                          AppToaster.show({
+                            message: (
+                              <div>
+                                <strong>Test Failed</strong>
+                                <br />
+                                <small>{error.message}</small>
+                              </div>
+                            ),
+                            intent: Intent.DANGER,
+                            timeout: 5000
+                          });
+                        }
+                      }}
+                    />
+
+                    {/* Quick Actions */}
+                    <div style={{ marginTop: 20, padding: 15, backgroundColor: '#f5f8fa', borderRadius: 4 }}>
+                      <h5 style={{ margin: '0 0 10px 0' }}>Quick Actions</h5>
+                      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                        <Button
+                          icon="export"
+                          text="Export Configuration"
+                          small
+                          onClick={() => {
+                            if (formatOptions.jsonMappingConfig) {
+                              const configJson = JSON.stringify(formatOptions.jsonMappingConfig, null, 2);
+                              const blob = new Blob([configJson], { type: 'application/json' });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = 'json-mapping-config.json';
+                              a.click();
+                              URL.revokeObjectURL(url);
+                              
+                              AppToaster.show({
+                                message: 'Configuration exported',
+                                intent: Intent.SUCCESS
+                              });
+                            }
+                          }}
+                          disabled={!formatOptions.jsonMappingConfig}
+                        />
+                        <Button
+                          icon="import"
+                          text="Import Configuration"
+                          small
+                          onClick={() => {
+                            const input = document.createElement('input');
+                            input.type = 'file';
+                            input.accept = '.json';
+                            input.onchange = async (e) => {
+                              const file = (e.target as HTMLInputElement).files?.[0];
+                              if (file) {
+                                try {
+                                  const text = await file.text();
+                                  const config = JSON.parse(text);
+                                  updateFormatOption('jsonMappingConfig', config);
+                                  
+                                  AppToaster.show({
+                                    message: 'Configuration imported successfully',
+                                    intent: Intent.SUCCESS
+                                  });
+                                } catch (error) {
+                                  AppToaster.show({
+                                    message: 'Failed to import configuration',
+                                    intent: Intent.DANGER
+                                  });
+                                }
+                              }
+                            };
+                            input.click();
+                          }}
+                        />
+                        <Button
+                          icon="refresh"
+                          text="Reset Configuration"
+                          small
+                          intent={Intent.DANGER}
+                          onClick={() => {
+                            if (confirm('Are you sure you want to reset the mapping configuration?')) {
+                              updateFormatOption('jsonMappingConfig', null);
+                              AppToaster.show({
+                                message: 'Configuration reset',
+                                intent: Intent.WARNING
+                              });
+                            }
+                          }}
+                          disabled={!formatOptions.jsonMappingConfig}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </>
         )}
+
 
         {format === 'xml' && (
           <>

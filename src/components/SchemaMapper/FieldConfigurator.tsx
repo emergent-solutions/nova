@@ -35,9 +35,39 @@ const FieldConfigurator: React.FC<FieldConfiguratorProps> = ({
     fallback_value: mapping?.fallback_value || ''
   });
 
-  const getSourceFields = (sourceId: string) => {
-    const source = sources.find(s => s.id === sourceId);
-    return source?.fields || [];
+  // Helper function to get fields from a data source
+  const getSourceFields = (sourceId: string): string[] => {
+    const source = config.dataSources.find(s => s.id === sourceId);
+    if (!source) return [];
+    
+    // Start with existing fields
+    let fields: string[] = [];
+    
+    // Try multiple ways to get fields
+    if (source.fields && source.fields.length > 0) {
+      fields = [...source.fields];
+    }
+    
+    // Check if fields were extracted during configuration
+    if (source.api_config?.extracted_fields) {
+      fields = [...source.api_config.extracted_fields];
+    }
+    
+    // Try to extract from sample data if available
+    if (fields.length === 0 && source.sample_data && source.sample_data.length > 0) {
+      const sample = source.sample_data[0];
+      if (typeof sample === 'object' && sample !== null) {
+        fields = Object.keys(sample);
+      }
+    }
+    
+    // Add metadata fields including category
+    if (source.category) {
+      fields.push('_metadata.category');
+    }
+    fields.push('_metadata.source_name', '_metadata.source_type', '_metadata.source_id');
+    
+    return fields;
   };
 
   const handleSave = () => {

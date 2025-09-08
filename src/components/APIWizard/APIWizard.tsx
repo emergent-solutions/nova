@@ -38,6 +38,7 @@ interface DataSourceConfig {
   id?: string;
   name: string;
   type: 'api' | 'database' | 'file' | 'rss' | null;
+  category?: string;
   isNew: boolean;
   api_config?: any;
   database_config?: any;
@@ -380,32 +381,53 @@ export const APIWizard: React.FC<APIWizardProps> = ({
         onComplete(data);
         onClose();
       } else {
-        // Create new endpoint
         const createdDataSourceIds: string[] = [];
-        
+              
         for (const newDs of newDataSources) {
-          if (newDs.name && newDs.type) {
-            const { data: createdDs, error } = await supabase
+          // Only create if it doesn't already have an ID and has required fields
+          if (newDs.name && newDs.type && !newDs.id) {
+            // Check if a data source with the same name already exists
+            const { data: existing } = await supabase
               .from('data_sources')
-              .insert({
-                name: newDs.name,
-                type: newDs.type,
-                active: true,
-                api_config: newDs.api_config,
-                database_config: newDs.database_config,
-                file_config: newDs.file_config,
-                user_id: user.id
-              })
-              .select()
+              .select('id')
+              .eq('name', newDs.name)
+              .eq('user_id', user.id)
               .single();
             
-            if (error) throw error;
-            if (createdDs) {
-              createdDataSourceIds.push(createdDs.id);
+            if (existing) {
+              // Use existing data source instead of creating duplicate
+              createdDataSourceIds.push(existing.id);
+              console.log(`Using existing data source: ${newDs.name}`);
+            } else {
+              // Create new data source
+              const { data: createdDs, error } = await supabase
+                .from('data_sources')
+                .insert({
+                  name: newDs.name,
+                  type: newDs.type,
+                  category: newDs.category,
+                  active: true,
+                  api_config: newDs.api_config,
+                  database_config: newDs.database_config,
+                  file_config: newDs.file_config,
+                  user_id: user.id
+                })
+                .select()
+                .single();
+              
+              if (error) throw error;
+              if (createdDs) {
+                createdDataSourceIds.push(createdDs.id);
+                // Update the newDs with the created ID to prevent re-creation
+                newDs.id = createdDs.id;
+              }
             }
+          } else if (newDs.id) {
+            // If it already has an ID, just use it
+            createdDataSourceIds.push(newDs.id);
           }
         }
-        
+
         const allDataSourceIds = [...selectedDataSources, ...createdDataSourceIds];
         
         const { data, error } = await supabase

@@ -127,6 +127,14 @@ const DataSourcesStep: React.FC<DataSourcesStepProps> = ({
                             <Tag minimal intent={getTypeColor(source.type)}>
                               {source.type.toUpperCase()}
                             </Tag>
+                            
+                            {/* Add category tag here */}
+                            {source.category && (
+                              <Tag minimal intent={Intent.PRIMARY} icon="tag" style={{ marginLeft: '5px' }}>
+                                {source.category}
+                              </Tag>
+                            )}
+                            
                             {source.sync_config?.enabled && (
                               <Tag minimal intent={Intent.SUCCESS} style={{ marginLeft: '5px' }}>
                                 Sync Enabled
@@ -179,65 +187,91 @@ const DataSourcesStep: React.FC<DataSourcesStepProps> = ({
             {newDataSources.length > 0 ? (
               <div>
                 {newDataSources.map((source, index) => (
-                  <Card
-                    key={index}
-                    style={{
-                      marginBottom: '10px',
-                      border: source.name && source.type ? '2px solid #0f9960' : '1px solid #e1e8ed'
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                      <h5 style={{ margin: 0 }}>New Data Source {index + 1}</h5>
+                  <Card key={index} style={{ marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                          <FormGroup label="Name" labelInfo="(required)">
+                            <InputGroup
+                              value={source.name}
+                              onChange={(e) => onUpdateNew(index, { name: e.target.value })}
+                              placeholder="e.g., Customer API"
+                              intent={!source.name ? Intent.DANGER : Intent.NONE}
+                            />
+                          </FormGroup>
+
+                          <FormGroup label="Type" labelInfo="(required)">
+                            <HTMLSelect
+                              value={source.type || ''}
+                              onChange={(e) => {
+                                const newType = e.target.value;
+                                const updates: any = { type: newType };
+                                
+                                // Initialize type-specific config when type is selected
+                                if (newType === 'api') {
+                                  updates.api_config = { method: 'GET', auth_type: 'none', headers: {} };
+                                } else if (newType === 'database') {
+                                  updates.database_config = { connections: {} };
+                                } else if (newType === 'file') {
+                                  updates.file_config = { source: 'url', format: 'csv' };
+                                }
+                                
+                                onUpdateNew(index, updates);
+                              }}
+                              fill
+                            >
+                              <option value="">Select type...</option>
+                              <option value="api">REST API</option>
+                              <option value="database">Database</option>
+                              <option value="file">File</option>
+                              <option value="rss">RSS Feed</option>
+                            </HTMLSelect>
+                          </FormGroup>
+                        </div>
+
+                        {/* Add Category field here */}
+                        <FormGroup label="Category" labelInfo="(optional)">
+                          <InputGroup
+                            value={source.category || ''}
+                            onChange={(e) => onUpdateNew(index, { category: e.target.value })}
+                            placeholder="e.g., Customer Data, Analytics, External API"
+                            leftIcon="tag"
+                          />
+                        </FormGroup>
+
+                        {/* Or use a select with predefined categories */}
+                        {/* <FormGroup label="Category" labelInfo="(optional)">
+                          <HTMLSelect
+                            value={source.category || ''}
+                            onChange={(e) => onUpdateNew(index, { category: e.target.value })}
+                            fill
+                          >
+                            <option value="">Select category...</option>
+                            <option value="customer">Customer Data</option>
+                            <option value="product">Product Data</option>
+                            <option value="analytics">Analytics</option>
+                            <option value="external">External API</option>
+                            <option value="internal">Internal System</option>
+                            <option value="reference">Reference Data</option>
+                            <option value="transactional">Transactional</option>
+                          </HTMLSelect>
+                        </FormGroup> */}
+
+                        {source.type && (
+                          <Callout intent={Intent.PRIMARY} icon="info-sign">
+                            You'll configure the details of this {source.type} source in the next step.
+                          </Callout>
+                        )}
+                      </div>
+
                       <Button
                         icon="trash"
-                        minimal
                         intent={Intent.DANGER}
+                        minimal
                         onClick={() => onRemoveNew(index)}
+                        style={{ marginLeft: '10px' }}
                       />
                     </div>
-
-                    <FormGroup label="Name" labelInfo="(required)">
-                      <InputGroup
-                        value={source.name}
-                        onChange={(e) => onUpdateNew(index, { name: e.target.value })}
-                        placeholder="Enter data source name"
-                        intent={!source.name ? Intent.DANGER : Intent.NONE}
-                      />
-                    </FormGroup>
-
-                    <FormGroup label="Type" labelInfo="(required)">
-                      <HTMLSelect
-                        value={source.type || ''}
-                        onChange={(e) => {
-                          const newType = e.target.value;
-                          const updates: any = { type: newType };
-                          
-                          // Initialize type-specific config when type is selected
-                          if (newType === 'api') {
-                            updates.api_config = { method: 'GET', auth_type: 'none', headers: {} };
-                          } else if (newType === 'database') {
-                            updates.database_config = { connections: {} };
-                          } else if (newType === 'file') {
-                            updates.file_config = { source: 'url', format: 'csv' };
-                          }
-                          
-                          onUpdateNew(index, updates);
-                        }}
-                        fill
-                      >
-                        <option value="">Select type...</option>
-                        <option value="api">REST API</option>
-                        <option value="database">Database</option>
-                        <option value="file">File</option>
-                        <option value="rss">RSS Feed</option>
-                      </HTMLSelect>
-                    </FormGroup>
-
-                    {source.type && (
-                      <Callout intent={Intent.PRIMARY} icon="info-sign">
-                        You'll configure the details of this {source.type} source in the next step.
-                      </Callout>
-                    )}
                   </Card>
                 ))}
               </div>
