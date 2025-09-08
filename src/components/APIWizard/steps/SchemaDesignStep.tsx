@@ -14,7 +14,15 @@ import {
   TextArea,
   Toaster,
   Position,
-  IToastProps
+  Tabs,
+  Tab,
+  Tag,
+  Icon,
+  Checkbox,
+  HTMLSelect,
+  Collapse,
+  Classes,
+  Divider
 } from '@blueprintjs/core';
 import { APIEndpointConfig } from '../../../types/schema.types';
 import { SchemaMapper } from '../../SchemaMapper/SchemaMapper';
@@ -22,6 +30,8 @@ import { generateAutoSchema } from '../../../utils/schemaHelpers';
 
 interface SchemaDesignStepProps {
   config: APIEndpointConfig;
+  dataSources?: any[]; // Add this for multi-source support
+  sampleData?: Record<string, any>; // Add this for field extraction
   onUpdate: (updates: Partial<APIEndpointConfig>) => void;
 }
 
@@ -30,8 +40,13 @@ const toaster = Toaster.create({
   position: Position.TOP
 });
 
-const SchemaDesignStep: React.FC<SchemaDesignStepProps> = ({ config, onUpdate }) => {
-  // Default to auto mode for better first-time user experience
+const SchemaDesignStep: React.FC<SchemaDesignStepProps> = ({ 
+  config, 
+  dataSources = [],
+  sampleData = {},
+  onUpdate 
+}) => {
+  // State for schema mode
   const [schemaMode, setSchemaMode] = useState<string>(() => {
     if (config.schemaMode) return config.schemaMode;
     return config.outputSchema?.root && config.outputSchema?.isCustom ? 'custom' : 'auto';
@@ -40,6 +55,26 @@ const SchemaDesignStep: React.FC<SchemaDesignStepProps> = ({ config, onUpdate })
   const [importedSchema, setImportedSchema] = useState<any>(null);
   const [manualSchemaText, setManualSchemaText] = useState<string>('');
   const [schemaError, setSchemaError] = useState<string>('');
+  
+  // Multi-source mapping state
+  const [mappingMode, setMappingMode] = useState<'single' | 'multi'>('single');
+  const [selectedSources, setSelectedSources] = useState<Set<string>>(new Set());
+  const [activeSourceTab, setActiveSourceTab] = useState<string>('');
+  const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
+  const [fieldMappings, setFieldMappings] = useState<any[]>(config.fieldMappings || []);
+  const [draggedField, setDraggedField] = useState<any>(null);
+
+  // Initialize selected sources from config
+  useEffect(() => {
+    if (config.dataSources && config.dataSources.length > 0) {
+      const sourceIds = new Set(config.dataSources.map(ds => ds.id));
+      setSelectedSources(sourceIds);
+      setActiveSourceTab(config.dataSources[0].id);
+      
+      // Determine mapping mode based on number of sources
+      setMappingMode(config.dataSources.length > 1 ? 'multi' : 'single');
+    }
+  }, [config.dataSources]);
 
   // Auto-generate schema on mount if in auto mode
   useEffect(() => {
@@ -71,37 +106,37 @@ const SchemaDesignStep: React.FC<SchemaDesignStepProps> = ({ config, onUpdate })
       case 'xml':
         return generateXMLSchema(config);
       default:
-        return generateAutoSchema(config);
+        return generateJSONSchema(config);
     }
+  };
+
+  const generateJSONSchema = (config: APIEndpointConfig) => {
+    return generateAutoSchema(config);
   };
 
   const generateRSSSchema = () => ({
     key: 'rss',
-    type: 'object' as const,
+    type: 'element' as const,
+    attributes: [{ key: 'version', value: '2.0' }],
     children: [{
       key: 'channel',
-      type: 'object' as const,
-      required: true,
+      type: 'element' as const,
       children: [
-        { key: 'title', type: 'string', required: true },
-        { key: 'link', type: 'url', required: true },
-        { key: 'description', type: 'string', required: true },
-        { key: 'language', type: 'string', required: false },
-        { key: 'pubDate', type: 'datetime', format: 'RFC822', required: false },
+        { key: 'title', type: 'string' },
+        { key: 'link', type: 'string' },
+        { key: 'description', type: 'string' },
+        { key: 'language', type: 'string' },
+        { key: 'pubDate', type: 'string' },
         {
-          key: 'items',
-          type: 'array',
-          children: [{
-            key: 'item',
-            type: 'object',
-            children: [
-              { key: 'title', type: 'string', required: true },
-              { key: 'link', type: 'url', required: true },
-              { key: 'description', type: 'string', required: false },
-              { key: 'pubDate', type: 'datetime', format: 'RFC822', required: false },
-              { key: 'guid', type: 'string', required: false }
-            ]
-          }]
+          key: 'item',
+          type: 'array' as const,
+          children: [
+            { key: 'title', type: 'string' },
+            { key: 'link', type: 'string' },
+            { key: 'description', type: 'string' },
+            { key: 'pubDate', type: 'string' },
+            { key: 'guid', type: 'string' }
+          ]
         }
       ]
     }]
@@ -109,35 +144,31 @@ const SchemaDesignStep: React.FC<SchemaDesignStepProps> = ({ config, onUpdate })
 
   const generateAtomSchema = () => ({
     key: 'feed',
-    type: 'object' as const,
+    type: 'element' as const,
     namespace: 'http://www.w3.org/2005/Atom',
     children: [
-      { key: 'title', type: 'string', required: true },
-      { key: 'id', type: 'uri', required: true },
-      { key: 'updated', type: 'datetime', format: 'ISO8601', required: true },
+      { key: 'title', type: 'string' },
+      { key: 'link', type: 'string' },
+      { key: 'updated', type: 'string' },
       { key: 'author', type: 'object', children: [{ key: 'name', type: 'string' }] },
       {
-        key: 'entries',
-        type: 'array',
-        children: [{
-          key: 'entry',
-          type: 'object',
-          children: [
-            { key: 'title', type: 'string', required: true },
-            { key: 'id', type: 'uri', required: true },
-            { key: 'updated', type: 'datetime', format: 'ISO8601', required: true },
-            { key: 'summary', type: 'string', required: false },
-            { key: 'link', type: 'url', required: false }
-          ]
-        }]
+        key: 'entry',
+        type: 'array' as const,
+        children: [
+          { key: 'title', type: 'string' },
+          { key: 'link', type: 'string' },
+          { key: 'id', type: 'string' },
+          { key: 'updated', type: 'string' },
+          { key: 'summary', type: 'string' }
+        ]
       }
     ]
   });
 
   const generateCSVSchema = (config: APIEndpointConfig) => ({
-    key: 'csv',
+    key: 'table',
     type: 'table' as const,
-    columns: config.dataSources.length > 0 
+    columns: config.dataSources.length > 0
       ? extractColumnsFromDataSources(config.dataSources)
       : [
           { key: 'id', type: 'number' },
@@ -156,12 +187,10 @@ const SchemaDesignStep: React.FC<SchemaDesignStepProps> = ({ config, onUpdate })
   });
 
   const extractColumnsFromDataSources = (dataSources: any[]) => {
-    // Implementation would analyze data sources to extract column definitions
     return [{ key: 'column1', type: 'string' }];
   };
 
   const extractFieldsFromDataSources = (dataSources: any[]) => {
-    // Implementation would analyze data sources to extract field definitions
     return [{ key: 'field1', type: 'string' }];
   };
 
@@ -185,6 +214,268 @@ const SchemaDesignStep: React.FC<SchemaDesignStepProps> = ({ config, onUpdate })
     }
   };
 
+  // Multi-source field extraction
+  const extractFieldsFromSource = (sourceId: string) => {
+    if (!sampleData[sourceId]) return [];
+    
+    const fields: any[] = [];
+    const data = sampleData[sourceId];
+    
+    // Add metadata fields
+    fields.push(
+      { path: '_source.id', name: 'Source ID', type: 'string', isMetadata: true },
+      { path: '_source.name', name: 'Source Name', type: 'string', isMetadata: true },
+      { path: '_source.timestamp', name: 'Timestamp', type: 'string', isMetadata: true }
+    );
+    
+    // Extract data fields
+    const extractFields = (obj: any, prefix = '') => {
+      if (Array.isArray(obj) && obj.length > 0) {
+        extractFields(obj[0], prefix);
+      } else if (obj && typeof obj === 'object') {
+        for (const key in obj) {
+          const fullPath = prefix ? `${prefix}.${key}` : key;
+          const value = obj[key];
+          
+          if (value === null || value === undefined) {
+            fields.push({ path: fullPath, name: fullPath, type: 'unknown' });
+          } else if (Array.isArray(value)) {
+            fields.push({ path: fullPath, name: fullPath, type: 'array' });
+            if (value.length > 0 && typeof value[0] === 'object') {
+              extractFields(value[0], fullPath + '[0]');
+            }
+          } else if (typeof value === 'object') {
+            fields.push({ path: fullPath, name: fullPath, type: 'object' });
+            extractFields(value, fullPath);
+          } else {
+            fields.push({ path: fullPath, name: fullPath, type: typeof value });
+          }
+        }
+      }
+    };
+    
+    extractFields(data);
+    return fields;
+  };
+
+  // Drag and drop handlers for multi-source mapping
+  const handleDragStart = (field: any, sourceId: string, sourceName: string) => {
+    setDraggedField({ ...field, sourceId, sourceName });
+  };
+
+  const handleDragEnd = () => {
+    setDraggedField(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDrop = (e: React.DragEvent, targetPath: string) => {
+    e.preventDefault();
+    if (!draggedField) return;
+    
+    const newMapping = {
+      id: `mapping-${Date.now()}`,
+      sourceId: draggedField.sourceId,
+      sourceName: draggedField.sourceName,
+      source_field: draggedField.path,
+      target_field: targetPath,
+      transform_type: 'direct'
+    };
+    
+    const updatedMappings = fieldMappings.filter(m => m.target_field !== targetPath);
+    updatedMappings.push(newMapping);
+    
+    setFieldMappings(updatedMappings);
+    onUpdate({ fieldMappings: updatedMappings });
+    setDraggedField(null);
+  };
+
+  const removeMapping = (targetPath: string) => {
+    const updatedMappings = fieldMappings.filter(m => m.target_field !== targetPath);
+    setFieldMappings(updatedMappings);
+    onUpdate({ fieldMappings: updatedMappings });
+  };
+
+  // Render multi-source field mapper
+  const renderMultiSourceMapper = () => {
+    const availableDataSources = dataSources || config.dataSources || [];
+    
+    return (
+      <div className="multi-source-mapper">
+        <div style={{ display: 'flex', gap: 20, height: 500 }}>
+          {/* Left Panel: Source Fields */}
+          <Card style={{ flex: '0 0 45%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <h4>Data Sources</h4>
+            {availableDataSources.length === 0 ? (
+              <NonIdealState
+                icon="database"
+                title="No data sources"
+                description="Please add data sources first"
+              />
+            ) : (
+              <Tabs
+                id="source-tabs"
+                selectedTabId={activeSourceTab}
+                onChange={(newTab: string) => setActiveSourceTab(newTab)}
+              >
+                {availableDataSources.map(source => (
+                  <Tab
+                    key={source.id}
+                    id={source.id}
+                    title={
+                      <span>
+                        {source.name}
+                        {source.category && (
+                          <Tag minimal style={{ marginLeft: 5 }}>
+                            {source.category}
+                          </Tag>
+                        )}
+                      </span>
+                    }
+                    panel={
+                      <div style={{ height: 380, overflowY: 'auto' }}>
+                        {extractFieldsFromSource(source.id).map(field => {
+                          const isMapped = fieldMappings.some(
+                            m => m.sourceId === source.id && m.source_field === field.path
+                          );
+                          
+                          return (
+                            <div
+                              key={field.path}
+                              draggable
+                              onDragStart={() => handleDragStart(field, source.id, source.name)}
+                              onDragEnd={handleDragEnd}
+                              style={{
+                                padding: 8,
+                                margin: 4,
+                                backgroundColor: isMapped ? '#e1f0fe' : '#f5f8fa',
+                                border: '1px solid #d3d8de',
+                                borderRadius: 4,
+                                cursor: 'grab',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 8
+                              }}
+                            >
+                              <Icon icon="drag-handle-vertical" size={12} />
+                              <span style={{ flex: 1 }}>{field.name}</span>
+                              <Tag minimal>{field.type}</Tag>
+                              {field.isMetadata && <Tag minimal intent={Intent.PRIMARY}>META</Tag>}
+                              {isMapped && <Icon icon="link" color="#137cbd" />}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    }
+                  />
+                ))}
+              </Tabs>
+            )}
+          </Card>
+
+          {/* Right Panel: Output Schema */}
+          <Card style={{ flex: '0 0 45%', overflow: 'hidden' }}>
+            <h4>Output Schema</h4>
+            <div style={{ height: 420, overflowY: 'auto' }}>
+              {config.outputSchema?.root ? (
+                renderSchemaNode(config.outputSchema.root, '')
+              ) : (
+                <NonIdealState
+                  icon="build"
+                  title="No schema defined"
+                  description="Generate or define your output schema"
+                />
+              )}
+            </div>
+          </Card>
+        </div>
+
+        {/* Mapping Summary */}
+        <Card style={{ marginTop: 20, backgroundColor: '#f5f8fa' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
+            <Icon icon="info-sign" />
+            <strong>Mapping Summary:</strong>
+            <Tag intent={Intent.SUCCESS}>
+              {fieldMappings.length} fields mapped
+            </Tag>
+            {availableDataSources.map(source => {
+              const sourceMappings = fieldMappings.filter(m => m.sourceId === source.id);
+              return sourceMappings.length > 0 ? (
+                <Tag key={source.id} minimal>
+                  {source.name}: {sourceMappings.length} fields
+                </Tag>
+              ) : null;
+            })}
+          </div>
+        </Card>
+      </div>
+    );
+  };
+
+  // Render schema node for mapping
+  const renderSchemaNode = (node: any, path: string) => {
+    const fullPath = path ? `${path}.${node.key}` : node.key;
+    const mapping = fieldMappings.find(m => m.target_field === fullPath);
+    
+    return (
+      <div key={fullPath}>
+        <div
+          onDragOver={handleDragOver}
+          onDrop={(e) => handleDrop(e, fullPath)}
+          style={{
+            padding: 10,
+            margin: 4,
+            backgroundColor: mapping ? '#d4edda' : '#f8f9fa',
+            border: `2px ${mapping ? 'solid #28a745' : 'dashed #dee2e6'}`,
+            borderRadius: 4,
+            minHeight: 40
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <strong>{node.key}</strong>
+              <Tag minimal style={{ marginLeft: 8 }}>{node.type}</Tag>
+              {node.required && (
+                <Tag minimal intent={Intent.DANGER} style={{ marginLeft: 4 }}>
+                  Required
+                </Tag>
+              )}
+            </div>
+            
+            {mapping && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Tag intent={Intent.SUCCESS}>
+                  {mapping.sourceName}: {mapping.source_field}
+                </Tag>
+                <Button
+                  minimal
+                  icon="cross"
+                  intent={Intent.DANGER}
+                  onClick={() => removeMapping(fullPath)}
+                />
+              </div>
+            )}
+          </div>
+          
+          {!mapping && (
+            <div style={{ marginTop: 8, color: '#6c757d', fontSize: 12 }}>
+              Drag a source field here to map
+            </div>
+          )}
+        </div>
+        
+        {node.children && node.children.length > 0 && (
+          <div style={{ marginLeft: 20 }}>
+            {node.children.map((child: any) => renderSchemaNode(child, fullPath))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const handleSchemaImport = (event: React.FormEvent<HTMLInputElement>) => {
     const file = (event.target as HTMLInputElement).files?.[0];
     if (!file) return;
@@ -193,9 +484,7 @@ const SchemaDesignStep: React.FC<SchemaDesignStepProps> = ({ config, onUpdate })
     reader.onload = (e) => {
       try {
         const content = e.target?.result as string;
-        const parsed = file.name.endsWith('.yaml') || file.name.endsWith('.yml')
-          ? parseYAML(content) // You'd need a YAML parser library
-          : JSON.parse(content);
+        const parsed = JSON.parse(content);
         
         setImportedSchema(parsed);
         
@@ -225,106 +514,9 @@ const SchemaDesignStep: React.FC<SchemaDesignStepProps> = ({ config, onUpdate })
     reader.readAsText(file);
   };
 
-  const parseYAML = (content: string) => {
-    // Simplified - in production use a proper YAML parser
-    throw new Error('YAML parsing not implemented');
-  };
-
   const detectAndConvertSchema = (schema: any): any => {
-    // Detect schema type and version
-    if (schema.openapi?.startsWith('3.')) {
-      return convertOpenAPI3Schema(schema);
-    } else if (schema.swagger === '2.0') {
-      return convertSwagger2Schema(schema);
-    } else if (schema.$schema) {
-      return convertJSONSchema(schema);
-    }
-    
-    // Default conversion
-    return convertOpenAPISchema(schema);
-  };
-
-  const convertOpenAPI3Schema = (openapi: any) => {
-    const schemas = openapi.components?.schemas || {};
-    const root = {
-      key: 'root',
-      type: 'object' as const,
-      isCustom: true,
-      children: Object.keys(schemas).map(key => 
-        convertSchemaObject(key, schemas[key])
-      )
-    };
-    return root;
-  };
-
-  const convertSwagger2Schema = (swagger: any) => {
-    const definitions = swagger.definitions || {};
-    const root = {
-      key: 'root',
-      type: 'object' as const,
-      isCustom: true,
-      children: Object.keys(definitions).map(key => 
-        convertSchemaObject(key, definitions[key])
-      )
-    };
-    return root;
-  };
-
-  const convertJSONSchema = (jsonSchema: any) => {
-    return convertSchemaObject('root', jsonSchema);
-  };
-
-  const convertSchemaObject = (key: string, schema: any): any => {
-    const node: any = {
-      key,
-      type: schema.type || 'object',
-      description: schema.description,
-      required: schema.required || false
-    };
-
-    // Handle different schema types
-    if (schema.type === 'object' && schema.properties) {
-      node.children = Object.keys(schema.properties).map(prop => 
-        convertSchemaObject(prop, schema.properties[prop])
-      );
-    } else if (schema.type === 'array' && schema.items) {
-      node.children = [convertSchemaObject('item', schema.items)];
-    } else if (schema.$ref) {
-      // Handle references - in production, resolve these properly
-      node.ref = schema.$ref;
-    } else if (schema.enum) {
-      node.enum = schema.enum;
-    }
-
-    // Handle format specifications
-    if (schema.format) {
-      node.format = schema.format;
-    }
-
-    return node;
-  };
-
-  const convertOpenAPISchema = (openapi: any) => {
-    // Fallback conversion
-    const schemas = openapi.components?.schemas || openapi.definitions || {};
-    const root = {
-      key: 'root',
-      type: 'object' as const,
-      isCustom: true,
-      children: Object.keys(schemas).map(key => ({
-        key,
-        type: schemas[key].type || 'object',
-        description: schemas[key].description,
-        children: schemas[key].properties ? 
-          Object.keys(schemas[key].properties).map(prop => ({
-            key: prop,
-            type: schemas[key].properties[prop].type || 'string',
-            description: schemas[key].properties[prop].description,
-            required: schemas[key].required?.includes(prop) || false
-          })) : []
-      }))
-    };
-    return root;
+    // Default conversion - you can expand this
+    return schema;
   };
 
   const handleManualSchemaUpdate = () => {
@@ -361,7 +553,9 @@ const SchemaDesignStep: React.FC<SchemaDesignStepProps> = ({ config, onUpdate })
   return (
     <div className="schema-design-step">
       <Callout intent={Intent.PRIMARY} icon="info-sign">
-        Design the structure of your API output. Auto-generation is recommended for most use cases.
+        Design the structure of your API output. {config.dataSources && config.dataSources.length > 1 
+          ? 'You can map fields from multiple data sources.' 
+          : 'Auto-generation is recommended for most use cases.'}
       </Callout>
 
       <RadioGroup
@@ -385,6 +579,16 @@ const SchemaDesignStep: React.FC<SchemaDesignStepProps> = ({ config, onUpdate })
             Manually design your output schema with full control
           </small>
         </Radio>
+        {config.dataSources && config.dataSources.length > 1 && (
+          <Radio 
+            label="Multi-source field mapping" 
+            value="multi-source"
+          >
+            <small className="bp4-text-muted">
+              Map fields from multiple data sources to your output schema
+            </small>
+          </Radio>
+        )}
         <Radio 
           label="Import from OpenAPI/Swagger" 
           value="import"
@@ -403,7 +607,7 @@ const SchemaDesignStep: React.FC<SchemaDesignStepProps> = ({ config, onUpdate })
         </Radio>
       </RadioGroup>
 
-      <div className="schema-content" style={{ marginTop: '20px' }}>
+      <div className="schema-content" style={{ marginTop: 20 }}>
         {schemaMode === 'auto' && (
           <Card className="auto-schema-preview">
             <h4>Auto-Generated Schema for {config.outputFormat?.toUpperCase() || 'JSON'}</h4>
@@ -412,7 +616,7 @@ const SchemaDesignStep: React.FC<SchemaDesignStepProps> = ({ config, onUpdate })
                 <Tree
                   contents={schemaNodeToTreeNode(config.outputSchema.root)}
                 />
-                <div style={{ marginTop: '10px' }}>
+                <div style={{ marginTop: 10 }}>
                   <Button
                     icon="refresh"
                     text="Regenerate"
@@ -459,6 +663,8 @@ const SchemaDesignStep: React.FC<SchemaDesignStepProps> = ({ config, onUpdate })
           </div>
         )}
 
+        {schemaMode === 'multi-source' && renderMultiSourceMapper()}
+
         {schemaMode === 'import' && (
           <Card className="import-schema">
             <h4>Import Schema</h4>
@@ -470,11 +676,11 @@ const SchemaDesignStep: React.FC<SchemaDesignStepProps> = ({ config, onUpdate })
                 accept: '.json,.yaml,.yml'
               }}
             />
-            <div className="bp4-text-muted" style={{ marginTop: '10px' }}>
+            <div className="bp4-text-muted" style={{ marginTop: 10 }}>
               Supports: OpenAPI 3.0, Swagger 2.0, JSON Schema
             </div>
             {importedSchema && (
-              <Callout intent={Intent.SUCCESS} style={{ marginTop: '15px' }}>
+              <Callout intent={Intent.SUCCESS} style={{ marginTop: 15 }}>
                 <strong>Successfully imported:</strong> {importedSchema.info?.title || importedSchema.title || 'Untitled Schema'}
                 <br />
                 <small>Version: {importedSchema.info?.version || importedSchema.version || 'Not specified'}</small>
@@ -515,7 +721,7 @@ const SchemaDesignStep: React.FC<SchemaDesignStepProps> = ({ config, onUpdate })
   );
 };
 
-// Enhanced helper function to convert schema nodes to Blueprint Tree nodes
+// Helper function to convert schema nodes to Blueprint Tree nodes
 function schemaNodeToTreeNode(node: any): TreeNode[] {
   if (!node) return [];
   

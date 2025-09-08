@@ -1,3 +1,6 @@
+// ============= FIXED FIELD MAPPING CANVAS - SHOWS ALL SOURCES =============
+// components/JsonFieldMapper/components/FieldMappingCanvas.tsx
+
 import React, { useState, useRef } from 'react';
 import {
   Card,
@@ -8,10 +11,10 @@ import {
   NonIdealState,
   Callout,
   Divider,
-  Classes
+  Classes,
+  Collapse
 } from '@blueprintjs/core';
 import { JsonFieldMapping } from '../../../types/jsonMapping.types';
-import { TransformationModal } from './TransformationModal';
 import { extractFieldPaths } from '../utils/pathHelpers';
 
 interface FieldMappingCanvasProps {
@@ -32,6 +35,8 @@ interface SourceField {
   value?: any;
   isMetadata?: boolean;
   category?: string;
+  sourceId: string;
+  sourceName: string;
 }
 
 export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
@@ -46,9 +51,8 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
 }) => {
   const [draggedField, setDraggedField] = useState<any>(null);
   const [selectedMapping, setSelectedMapping] = useState<string | null>(null);
-  const [showTransformModal, setShowTransformModal] = useState(false);
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
-    new Set(['metadata', 'data']) // Expand by default
+  const [expandedSources, setExpandedSources] = useState<Set<string>>(() => 
+    new Set(sourceSelection.sources.map((s: any) => s.id))
   );
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -58,32 +62,8 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
       <div className="field-mapping-canvas" ref={canvasRef}>
         <NonIdealState
           icon="warning-sign"
-          title="No Source Selected"
-          description="Please go back and select a data source first."
-          action={
-            <Button
-              text="Go Back"
-              icon="arrow-left"
-              intent={Intent.PRIMARY}
-              onClick={onPrevious}
-            />
-          }
-        />
-      </div>
-    );
-  }
-
-  const sourceId = sourceSelection.sources[0]?.id;
-  const sourceName = sourceSelection.sources[0]?.name || sourceId;
-  const sourceType = sourceSelection.sources[0]?.type || 'unknown';
-
-  if (!sourceId || (!sampleData || !sampleData[sourceId])) {
-    return (
-      <div className="field-mapping-canvas" ref={canvasRef}>
-        <NonIdealState
-          icon="database"
-          title="No Sample Data Available"
-          description={`No sample data found for source "${sourceName}". Please test your data source first.`}
+          title="No Sources Selected"
+          description="Please go back and select data sources first."
           action={
             <Button
               text="Go Back"
@@ -117,108 +97,81 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
     );
   }
 
-  // ============= BUILD SOURCE FIELDS =============
-  
-  // Create metadata fields for the data source
-  const metadataFields: SourceField[] = [
-    {
-      path: '_source.id',
-      name: 'Source ID',
-      type: 'string',
-      value: sourceId,
-      isMetadata: true,
-      category: 'metadata'
-    },
-    {
-      path: '_source.name',
-      name: 'Source Name',
-      type: 'string',
-      value: sourceName,
-      isMetadata: true,
-      category: 'metadata'
-    },
-    {
-      path: '_source.type',
-      name: 'Source Type',
-      type: 'string',
-      value: sourceType,
-      isMetadata: true,
-      category: 'metadata'
-    },
-    {
-      path: '_source.timestamp',
-      name: 'Fetch Timestamp',
-      type: 'string',
-      value: new Date().toISOString(),
-      isMetadata: true,
-      category: 'metadata'
-    },
-    {
-      path: '_source.path',
-      name: 'Source Path',
-      type: 'string',
-      value: sourceSelection.primaryPath || 'root',
-      isMetadata: true,
-      category: 'metadata'
-    }
-  ];
-
-  // Add data source category if available
-  const dataSource = sourceSelection.sources[0];
-  if (dataSource.category) {
-    metadataFields.push({
-      path: '_source.category',
-      name: 'Source Category',
-      type: 'string',
-      value: dataSource.category,
-      isMetadata: true,
-      category: 'metadata'
+  // ============= BUILD SOURCE FIELDS FROM ALL SOURCES =============
+  const getAllSourceFields = (): Record<string, SourceField[]> => {
+    const fieldsBySource: Record<string, SourceField[]> = {};
+    
+    sourceSelection.sources.forEach((source: any) => {
+      const fields: SourceField[] = [];
+      
+      // Add metadata fields for this source
+      fields.push(
+        {
+          path: '_source.id',
+          name: 'Source ID',
+          type: 'string',
+          value: source.id,
+          isMetadata: true,
+          category: 'metadata',
+          sourceId: source.id,
+          sourceName: source.name
+        },
+        {
+          path: '_source.name',
+          name: 'Source Name',
+          type: 'string',
+          value: source.name,
+          isMetadata: true,
+          category: 'metadata',
+          sourceId: source.id,
+          sourceName: source.name
+        },
+        {
+          path: '_source.category',
+          name: 'Source Category',
+          type: 'string',
+          value: source.category || 'uncategorized',
+          isMetadata: true,
+          category: 'metadata',
+          sourceId: source.id,
+          sourceName: source.name
+        }
+      );
+      
+      // Extract data fields from sample data
+      if (sampleData[source.id]) {
+        let dataToAnalyze = sampleData[source.id];
+        
+        // Navigate to the primary path if specified
+        if (source.primaryPath) {
+          const parts = source.primaryPath.split('.');
+          for (const part of parts) {
+            if (dataToAnalyze && typeof dataToAnalyze === 'object') {
+              dataToAnalyze = dataToAnalyze[part];
+            }
+          }
+        }
+        
+        // Extract fields from the data
+        const extracted = extractFieldPaths(dataToAnalyze, '');
+        extracted.forEach(field => {
+          fields.push({
+            ...field,
+            category: 'data',
+            isMetadata: false,
+            sourceId: source.id,
+            sourceName: source.name
+          });
+        });
+      }
+      
+      fieldsBySource[source.id] = fields;
     });
-  }
+    
+    return fieldsBySource;
+  };
 
-  // Add any custom metadata from the data source
-  if (dataSource.metadata) {
-    Object.keys(dataSource.metadata).forEach(key => {
-      metadataFields.push({
-        path: `_source.metadata.${key}`,
-        name: `Source ${key.charAt(0).toUpperCase() + key.slice(1)}`,
-        type: typeof dataSource.metadata[key],
-        value: dataSource.metadata[key],
-        isMetadata: true,
-        category: 'metadata'
-      });
-    });
-  }
-
-  // Extract data fields from sample data
-  let dataFields: SourceField[] = [];
-  try {
-    const extracted = extractFieldPaths(
-      sampleData[sourceId],
-      sourceSelection.primaryPath || ''
-    );
-    dataFields = extracted.map(field => ({
-      ...field,
-      category: 'data',
-      isMetadata: false
-    }));
-  } catch (error) {
-    console.error('Error extracting source fields:', error);
-    dataFields = [];
-  }
-
-  // Combine all source fields
-  const allSourceFields = [...metadataFields, ...dataFields];
-
-  // Group fields by category
-  const fieldsByCategory = allSourceFields.reduce((acc, field) => {
-    const category = field.category || 'other';
-    if (!acc[category]) {
-      acc[category] = [];
-    }
-    acc[category].push(field);
-    return acc;
-  }, {} as Record<string, SourceField[]>);
+  const fieldsBySource = getAllSourceFields();
 
   // ============= DRAG AND DROP HANDLERS =============
   const handleDragStart = (field: SourceField) => {
@@ -236,27 +189,36 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
 
   const handleDrop = (e: React.DragEvent, targetPath: string) => {
     e.preventDefault();
-    
     if (!draggedField) return;
-
-    const newMapping: JsonFieldMapping = {
-      id: `mapping_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      targetPath,
-      sourcePath: draggedField.path,
-      sourceId: sourceId
-    };
-
-    // Check if mapping already exists for this target
-    const existingIndex = mappings.findIndex(m => m.targetPath === targetPath);
     
-    if (existingIndex >= 0) {
-      const updated = [...mappings];
-      updated[existingIndex] = newMapping;
-      onChange(updated);
+    // Check if this target already has a mapping from this source
+    const existingMappingIndex = mappings.findIndex(
+      m => m.targetPath === targetPath && m.sourceId === draggedField.sourceId
+    );
+    
+    const newMapping: JsonFieldMapping = {
+      id: `mapping-${Date.now()}-${Math.random()}`,
+      sourceId: draggedField.sourceId,
+      sourceName: draggedField.sourceName,
+      sourcePath: draggedField.path,
+      targetPath: targetPath,
+      transformationType: 'direct',
+      transformations: [],
+      fallbackValue: null,
+      conditional: null
+    };
+    
+    let updatedMappings = [...mappings];
+    
+    if (existingMappingIndex >= 0) {
+      // Replace existing mapping from this source for this target
+      updatedMappings[existingMappingIndex] = newMapping;
     } else {
-      onChange([...mappings, newMapping]);
+      // Add new mapping
+      updatedMappings.push(newMapping);
     }
-
+    
+    onChange(updatedMappings);
     setDraggedField(null);
   };
 
@@ -264,286 +226,262 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
     onChange(mappings.filter(m => m.id !== mappingId));
   };
 
-  const getMappingForTarget = (targetPath: string) => {
-    return mappings.find(m => m.targetPath === targetPath);
-  };
-
-  // Toggle category expansion
-  const toggleCategory = (category: string) => {
-    const newExpanded = new Set(expandedCategories);
-    if (newExpanded.has(category)) {
-      newExpanded.delete(category);
+  const toggleSourceExpanded = (sourceId: string) => {
+    const newExpanded = new Set(expandedSources);
+    if (newExpanded.has(sourceId)) {
+      newExpanded.delete(sourceId);
     } else {
-      newExpanded.add(category);
+      newExpanded.add(sourceId);
     }
-    setExpandedCategories(newExpanded);
+    setExpandedSources(newExpanded);
   };
 
-  // ============= RENDER FUNCTIONS =============
-  const renderSourceField = (field: SourceField) => {
-    const isMapped = mappings.some(m => m.sourcePath === field.path);
-    
-    return (
-      <div
-        key={field.path}
-        className={`source-field ${isMapped ? 'mapped' : ''} ${draggedField?.path === field.path ? 'dragging' : ''}`}
-        draggable
-        onDragStart={() => handleDragStart(field)}
-        onDragEnd={handleDragEnd}
-        style={{ 
-          cursor: 'grab',
-          padding: '6px 8px',
-          margin: '2px 0',
-          borderRadius: '3px',
-          background: field.isMetadata ? '#f5f8fa' : '#ffffff',
-          border: `1px solid ${isMapped ? '#0f9960' : '#e1e8ed'}`,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          transition: 'all 0.2s'
-        }}
-        onMouseEnter={(e) => {
-          if (!isMapped) {
-            e.currentTarget.style.background = field.isMetadata ? '#e1e8ed' : '#f5f8fa';
-            e.currentTarget.style.borderColor = '#137cbd';
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!isMapped) {
-            e.currentTarget.style.background = field.isMetadata ? '#f5f8fa' : '#ffffff';
-            e.currentTarget.style.borderColor = '#e1e8ed';
-          }
-        }}
-      >
-        <Icon icon="drag-handle-vertical" size={12} />
-        <span style={{ 
-          flex: 1, 
-          fontSize: '12px',
-          fontFamily: field.isMetadata ? 'monospace' : 'inherit'
-        }}>
-          {field.isMetadata ? field.path : field.name || field.path}
-        </span>
-        <Tag minimal small intent={field.isMetadata ? Intent.PRIMARY : Intent.NONE}>
-          {field.type || 'unknown'}
-        </Tag>
-        {isMapped && <Icon icon="link" intent={Intent.SUCCESS} size={12} />}
-        {field.isMetadata && <Icon icon="info-sign" intent={Intent.PRIMARY} size={12} />}
-      </div>
-    );
+  // Get all mappings for a target field
+  const getMappingsForTarget = (targetPath: string) => {
+    return mappings.filter(m => m.targetPath === targetPath);
   };
 
-  const renderTargetField = (field: any) => {
-    const mapping = getMappingForTarget(field.path);
-    
-    return (
-      <div
-        key={field.path}
-        className={`target-field ${mapping ? 'mapped' : ''}`}
-        onDragOver={handleDragOver}
-        onDrop={(e) => handleDrop(e, field.path)}
-        style={{ 
-          minHeight: 36,
-          padding: '6px 8px',
-          margin: '2px 0',
-          borderRadius: '3px',
-          background: mapping ? '#e7f3e7' : '#ffffff',
-          border: `1px solid ${mapping ? '#0f9960' : '#e1e8ed'}`,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          transition: 'all 0.2s'
-        }}
-      >
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Icon icon={field.required ? 'star' : 'circle'} size={12} />
-          <span style={{ fontFamily: 'monospace', fontSize: '12px' }}>{field.path}</span>
-          <Tag minimal small>{field.type || 'any'}</Tag>
-        </div>
-        
-        {mapping && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Tag intent={Intent.SUCCESS} minimal small>
-              <Icon icon="arrow-left" size={10} />
-              <span style={{ marginLeft: 4 }}>{mapping.sourcePath}</span>
-            </Tag>
-            <Button
-              minimal
-              small
-              icon="edit"
-              onClick={() => {
-                setSelectedMapping(mapping.id);
-                setShowTransformModal(true);
-              }}
-            />
-            <Button
-              minimal
-              small
-              icon="cross"
-              intent={Intent.DANGER}
-              onClick={() => removeMapping(mapping.id)}
-            />
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const renderFieldCategory = (category: string, fields: SourceField[]) => {
-    const isExpanded = expandedCategories.has(category);
-    const categoryInfo = {
-      metadata: {
-        icon: 'info-sign',
-        title: 'Source Metadata',
-        description: 'Information about the data source',
-        intent: Intent.PRIMARY
-      },
-      data: {
-        icon: 'database',
-        title: 'Data Fields',
-        description: 'Fields from your source data',
-        intent: Intent.NONE
-      },
-      other: {
-        icon: 'folder-close',
-        title: 'Other Fields',
-        description: 'Additional fields',
-        intent: Intent.NONE
-      }
-    }[category] || { icon: 'folder-close', title: category, description: '', intent: Intent.NONE };
-
-    return (
-      <div key={category} style={{ marginBottom: 10 }}>
-        <div 
-          onClick={() => toggleCategory(category)}
-          style={{ 
-            cursor: 'pointer',
-            padding: '6px 10px',
-            background: '#e1e8ed',
-            borderRadius: '3px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            marginBottom: '4px'
-          }}
-        >
-          <Icon icon={isExpanded ? 'chevron-down' : 'chevron-right'} size={12} />
-          <Icon icon={categoryInfo.icon as any} intent={categoryInfo.intent} size={12} />
-          <span style={{ flex: 1, fontWeight: 500, fontSize: '13px' }}>
-            {categoryInfo.title}
-          </span>
-          <Tag minimal small intent={categoryInfo.intent}>
-            {fields.length} fields
-          </Tag>
-        </div>
-        
-        {isExpanded && (
-          <div style={{ paddingLeft: 20 }}>
-            {categoryInfo.description && (
-              <p className={Classes.TEXT_MUTED} style={{ fontSize: '11px', margin: '4px 0 8px 0' }}>
-                {categoryInfo.description}
-              </p>
-            )}
-            {fields.map(renderSourceField)}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // ============= MAIN RENDER =============
   return (
     <div className="field-mapping-canvas" ref={canvasRef}>
       <Callout intent={Intent.PRIMARY} icon="info-sign" style={{ marginBottom: 20 }}>
-        <strong>Map Your Fields</strong>
-        <p style={{ margin: '5px 0 0 0' }}>
-          Drag fields from the source panel (left) to the output panel (right). 
-          Source metadata fields are available to include information about the data source.
-        </p>
+        Drag fields from any source to the output fields. Multiple sources can map to the same output field - 
+        the appropriate source field will be used based on which source each item comes from.
       </Callout>
 
-      <div className="mapping-panels" style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 20 }}>
-        {/* Source Fields Panel */}
-        <Card>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <h4 style={{ margin: 0 }}>Source Fields</h4>
-            <Tag minimal>
-              {allSourceFields.length} available
-            </Tag>
-          </div>
-          
-          <Divider style={{ margin: '10px 0' }} />
-          
-          <div style={{ maxHeight: 400, overflowY: 'auto' }}>
-            {Object.keys(fieldsByCategory).map(category => 
-              renderFieldCategory(category, fieldsByCategory[category])
-            )}
+      <div className="mapping-container" style={{ display: 'flex', gap: 20, minHeight: 600 }}>
+        {/* Left Panel: All Source Fields */}
+        <Card style={{ flex: '0 0 45%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <h3>Source Fields (All Sources)</h3>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {sourceSelection.sources.map((source: any) => {
+              const isExpanded = expandedSources.has(source.id);
+              const sourceFields = fieldsBySource[source.id] || [];
+              
+              return (
+                <div key={source.id} style={{ marginBottom: 15 }}>
+                  <div 
+                    style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: 10,
+                      padding: '8px',
+                      backgroundColor: '#f5f8fa',
+                      cursor: 'pointer'
+                    }}
+                    onClick={() => toggleSourceExpanded(source.id)}
+                  >
+                    <Icon icon={isExpanded ? 'chevron-down' : 'chevron-right'} />
+                    <Icon icon={
+                      source.type === 'api' ? 'cloud' :
+                      source.type === 'database' ? 'database' :
+                      source.type === 'file' ? 'document' :
+                      'data-connection'
+                    } />
+                    <strong>{source.name}</strong>
+                    <Tag minimal>{source.type}</Tag>
+                    {source.category && (
+                      <Tag minimal icon="tag">{source.category}</Tag>
+                    )}
+                    <Tag minimal intent={Intent.PRIMARY}>
+                      {sourceFields.length} fields
+                    </Tag>
+                  </div>
+                  
+                  <Collapse isOpen={isExpanded}>
+                    <div style={{ paddingLeft: 20, paddingTop: 10 }}>
+                      {/* Metadata Fields */}
+                      <div style={{ marginBottom: 10 }}>
+                        <small style={{ color: '#5c7080', fontWeight: 'bold' }}>METADATA</small>
+                        {sourceFields
+                          .filter(f => f.isMetadata)
+                          .map(field => {
+                            const isMapped = mappings.some(
+                              m => m.sourceId === source.id && m.sourcePath === field.path
+                            );
+                            
+                            return (
+                              <div
+                                key={field.path}
+                                draggable
+                                onDragStart={() => handleDragStart(field)}
+                                onDragEnd={handleDragEnd}
+                                style={{
+                                  padding: 6,
+                                  margin: '4px 0',
+                                  backgroundColor: isMapped ? '#d4edda' : '#f8f9fa',
+                                  border: '1px solid #d3d8de',
+                                  borderRadius: 3,
+                                  cursor: 'grab',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 8,
+                                  fontSize: 12
+                                }}
+                              >
+                                <Icon icon="drag-handle-vertical" size={10} />
+                                <span style={{ flex: 1 }}>{field.name}</span>
+                                <Tag minimal small>{field.type}</Tag>
+                                {isMapped && <Icon icon="link" size={10} color="#28a745" />}
+                              </div>
+                            );
+                          })}
+                      </div>
+                      
+                      {/* Data Fields */}
+                      <div>
+                        <small style={{ color: '#5c7080', fontWeight: 'bold' }}>DATA FIELDS</small>
+                        {sourceFields
+                          .filter(f => !f.isMetadata)
+                          .map(field => {
+                            const isMapped = mappings.some(
+                              m => m.sourceId === source.id && m.sourcePath === field.path
+                            );
+                            
+                            return (
+                              <div
+                                key={field.path}
+                                draggable
+                                onDragStart={() => handleDragStart(field)}
+                                onDragEnd={handleDragEnd}
+                                style={{
+                                  padding: 6,
+                                  margin: '4px 0',
+                                  backgroundColor: isMapped ? '#d4edda' : '#ffffff',
+                                  border: '1px solid #d3d8de',
+                                  borderRadius: 3,
+                                  cursor: 'grab',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 8,
+                                  fontSize: 12
+                                }}
+                              >
+                                <Icon icon="drag-handle-vertical" size={10} />
+                                <span style={{ flex: 1 }}>{field.path}</span>
+                                <Tag minimal small>{field.type}</Tag>
+                                {isMapped && <Icon icon="link" size={10} color="#28a745" />}
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  </Collapse>
+                </div>
+              );
+            })}
           </div>
         </Card>
 
-        {/* Visual Connection Indicator */}
-        <div style={{ 
-          display: 'flex', 
-          flexDirection: 'column', 
-          alignItems: 'center', 
-          justifyContent: 'center',
-          color: '#5c7080'
-        }}>
-          <Icon icon="exchange" size={30} />
-          <div style={{ marginTop: 10, fontSize: 12 }}>
-            {mappings.length} mapping{mappings.length !== 1 ? 's' : ''}
-          </div>
+        {/* Center Arrow */}
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <Icon icon="arrow-right" size={20} />
         </div>
 
-        {/* Target Fields Panel */}
-        <Card>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <h4 style={{ margin: 0 }}>Output Fields</h4>
-            <Tag minimal intent={Intent.PRIMARY}>
-              {outputTemplate.fields.length} defined
-            </Tag>
-          </div>
-          
-          <Divider style={{ margin: '10px 0' }} />
-          
-          <div style={{ maxHeight: 400, overflowY: 'auto' }}>
-            {outputTemplate.fields.length > 0 ? (
-              outputTemplate.fields.map(renderTargetField)
-            ) : (
-              <NonIdealState
-                icon="build"
-                title="No output fields"
-                description="Define your output structure first"
-              />
-            )}
+        {/* Right Panel: Target Fields */}
+        <Card style={{ flex: '0 0 45%', overflow: 'hidden' }}>
+          <h3>Output Fields</h3>
+          <div style={{ height: 520, overflowY: 'auto' }}>
+            {outputTemplate.fields.map((field: any) => {
+              const targetMappings = getMappingsForTarget(field.path);
+              const hasMappings = targetMappings.length > 0;
+              
+              return (
+                <div
+                  key={field.path}
+                  onDragOver={handleDragOver}
+                  onDrop={(e) => handleDrop(e, field.path)}
+                  style={{
+                    padding: 10,
+                    margin: '8px 4px',
+                    backgroundColor: hasMappings ? '#d4edda' : '#f8f9fa',
+                    border: `2px ${hasMappings ? 'solid #28a745' : 'dashed #dee2e6'}`,
+                    borderRadius: 4,
+                    minHeight: 60
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <div>
+                      <strong>{field.name || field.path}</strong>
+                      <Tag minimal style={{ marginLeft: 8 }}>{field.type}</Tag>
+                      {field.required && (
+                        <Tag minimal intent={Intent.DANGER} style={{ marginLeft: 4 }}>
+                          Required
+                        </Tag>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {targetMappings.length > 0 ? (
+                    <div>
+                      <small style={{ color: '#5c7080' }}>Mapped from:</small>
+                      {targetMappings.map(mapping => (
+                        <div 
+                          key={mapping.id}
+                          style={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: 8,
+                            marginTop: 4,
+                            padding: '4px 8px',
+                            backgroundColor: '#ffffff',
+                            borderRadius: 3,
+                            fontSize: 12
+                          }}
+                        >
+                          <Tag intent={Intent.SUCCESS} minimal>
+                            {mapping.sourceName}
+                          </Tag>
+                          <code>{mapping.sourcePath}</code>
+                          <Button
+                            minimal
+                            small
+                            icon="cross"
+                            intent={Intent.DANGER}
+                            onClick={() => removeMapping(mapping.id)}
+                            style={{ marginLeft: 'auto' }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ color: '#6c757d', fontSize: 12 }}>
+                      Drag fields here from any source
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </Card>
       </div>
 
-      {/* Mapping Summary */}
-      {mappings.length > 0 && (
-        <Card style={{ marginTop: 20 }}>
-          <h4>Mapping Summary</h4>
-          <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-            <div>
-              <strong>Total Mappings:</strong> {mappings.length}
-            </div>
-            <div>
-              <strong>Metadata Fields Used:</strong>{' '}
-              {mappings.filter(m => m.sourcePath.startsWith('_source')).length}
-            </div>
-            <div>
-              <strong>Required Fields Mapped:</strong>{' '}
-              {outputTemplate.fields
-                .filter((f: any) => f.required)
-                .filter((f: any) => getMappingForTarget(f.path))
-                .length} / {outputTemplate.fields.filter((f: any) => f.required).length}
-            </div>
-          </div>
-        </Card>
-      )}
+      {/* Summary Section */}
+      <Card style={{ marginTop: 20, backgroundColor: '#f5f8fa' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
+          <Icon icon="info-sign" />
+          <strong>Mapping Summary:</strong>
+          <Tag intent={Intent.SUCCESS}>
+            {mappings.length} total mappings
+          </Tag>
+          <Tag intent={Intent.WARNING}>
+            {outputTemplate.fields.filter((f: any) => 
+              f.required && !mappings.some(m => m.targetPath === f.path)
+            ).length} required fields unmapped
+          </Tag>
+          <Divider />
+          {sourceSelection.sources.map((source: any) => {
+            const sourceMappings = mappings.filter(m => m.sourceId === source.id);
+            return (
+              <Tag key={source.id} minimal>
+                {source.name}: {sourceMappings.length}
+              </Tag>
+            );
+          })}
+        </div>
+      </Card>
 
-      {/* Action Buttons */}
-      <div className="step-actions" style={{ marginTop: 30, display: 'flex', justifyContent: 'space-between' }}>
+      {/* Navigation */}
+      <div style={{ marginTop: 20, display: 'flex', justifyContent: 'space-between' }}>
         <Button
           text="Previous"
           icon="arrow-left"
@@ -551,33 +489,14 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
         />
         <Button
           intent={Intent.PRIMARY}
-          text="Next: Preview"
+          text="Next: Preview & Test"
           rightIcon="arrow-right"
-          disabled={mappings.length === 0}
           onClick={onNext}
+          disabled={mappings.length === 0}
         />
       </div>
-
-      {/* Transformation Modal */}
-      {showTransformModal && selectedMapping && (
-        <TransformationModal
-          mapping={mappings.find(m => m.id === selectedMapping)!}
-          onSave={(updated) => {
-            const index = mappings.findIndex(m => m.id === updated.id);
-            if (index >= 0) {
-              const newMappings = [...mappings];
-              newMappings[index] = updated;
-              onChange(newMappings);
-            }
-            setShowTransformModal(false);
-            setSelectedMapping(null);
-          }}
-          onClose={() => {
-            setShowTransformModal(false);
-            setSelectedMapping(null);
-          }}
-        />
-      )}
     </div>
   );
 };
+
+export default FieldMappingCanvas;

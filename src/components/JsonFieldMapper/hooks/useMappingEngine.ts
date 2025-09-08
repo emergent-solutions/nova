@@ -9,9 +9,8 @@ export function useMappingEngine(
 ) {
   // Helper to get metadata values
   const getMetadataValue = useCallback((path: string, sourceId: string, sourceInfo: any) => {
-    // Handle _source.* metadata fields
     if (path.startsWith('_source.')) {
-      const metadataKey = path.substring(8); // Remove "_source." prefix
+      const metadataKey = path.substring(8);
       
       switch (metadataKey) {
         case 'id':
@@ -25,9 +24,8 @@ export function useMappingEngine(
         case 'timestamp':
           return new Date().toISOString();
         case 'path':
-          return config.sourceSelection.primaryPath || 'root';
+          return sourceInfo?.primaryPath || 'root';
         default:
-          // Check for nested metadata like _source.metadata.version
           if (metadataKey.startsWith('metadata.')) {
             const nestedKey = metadataKey.substring(9);
             return sourceInfo?.metadata?.[nestedKey];
@@ -36,7 +34,7 @@ export function useMappingEngine(
       }
     }
     return null;
-  }, [config.sourceSelection.primaryPath]);
+  }, []);
 
   const processMapping = useCallback((
     sourceData: any,
@@ -89,51 +87,214 @@ export function useMappingEngine(
   }, [config.transformations, getMetadataValue]);
 
   const generatePreview = useCallback(() => {
-    if (!config.sourceSelection.primaryPath) return null;
+    console.log('Generating preview with config:', config);
+    console.log('Available sample data:', Object.keys(sampleData));
+    console.log('Field mappings:', config.fieldMappings);
     
-    const sourceId = config.sourceSelection.sources[0]?.id;
-    if (!sourceId || !sampleData[sourceId]) return null;
+    // Check if we have any sources selected
+    if (!config.sourceSelection.sources || config.sourceSelection.sources.length === 0) {
+      console.warn('No sources selected');
+      return null;
+    }
+
+    // Determine merge mode
+    const mergeMode = config.sourceSelection.mergeMode || 'single';
+    const sources = config.sourceSelection.sources;
     
-    // Get source info for metadata
-    const sourceInfo = config.sourceSelection.sources[0];
-    
-    // Get the actual data
-    const sourceData = getValueFromPath(
-      sampleData[sourceId],
-      config.sourceSelection.primaryPath
-    );
-    
-    // Process the mapped data
-    let mappedData;
-    
-    if (config.sourceSelection.type === 'array') {
-      // Map array items
-      if (!Array.isArray(sourceData)) return [];
+    if (mergeMode === 'combined' && sources.length > 1) {
+      // COMBINED MODE: Merge articles from all sources into a single array
+      console.log('Combined mode - merging articles from multiple sources');
       
-      mappedData = sourceData.slice(0, 5).map(item => { // Limit preview to 5 items
+      let allArticles: any[] = [];
+      
+      // Collect articles from each source
+      sources.forEach(sourceInfo => {
+        if (!sampleData[sourceInfo.id]) {
+          console.warn(`No sample data for source: ${sourceInfo.id}`);
+          return;
+        }
+        
+        // Get data from this source
+        let sourceData = sampleData[sourceInfo.id];
+        
+        // Navigate to the path if specified (e.g., "articles", "data.items", etc.)
+        if (sourceInfo.primaryPath) {
+          sourceData = getValueFromPath(sourceData, sourceInfo.primaryPath);
+        }
+        
+        console.log(`Source ${sourceInfo.name}: found ${Array.isArray(sourceData) ? sourceData.length : 0} items`);
+        
+        // Add articles from this source
+        if (Array.isArray(sourceData)) {
+          // Add each article with its source information attached
+          sourceData.forEach(article => {
+            allArticles.push({
+              ...article,
+              _sourceInfo: {
+                id: sourceInfo.id,
+                name: sourceInfo.name,
+                category: sourceInfo.category
+              }
+            });
+          });
+        }
+      });
+      
+      console.log(`Total articles collected: ${allArticles.length}`);
+      
+      // Now map each article to the output structure
+      let mappedArticles = allArticles.slice(0, 10).map((article, index) => {
+        let mappedArticle = {};
+        
+        // Group mappings by target field to handle multiple sources mapping to same field
+        const mappingsByTarget: Record<string, JsonFieldMapping[]> = {};
+        config.fieldMappings.forEach(mapping => {
+          if (!mappingsByTarget[mapping.targetPath]) {
+            mappingsByTarget[mapping.targetPath] = [];
+          }
+          mappingsByTarget[mapping.targetPath].push(mapping);
+        });
+        
+        // Process each target field
+        Object.entries(mappingsByTarget).forEach(([targetPath, mappings]) => {
+          // Find the mapping that matches this article's source
+          const matchingMapping = mappings.find(m => 
+            m.sourceId === article._sourceInfo.id
+          );
+          
+          if (matchingMapping) {
+            // Use the mapping from the article's source
+            const value = processMapping(article, matchingMapping, article._sourceInfo);
+            mappedArticle = setValueAtPath(mappedArticle, targetPath, value);
+          } else if (mappings.length === 1 && !mappings[0].sourceId) {
+            // If there's only one mapping and it doesn't specify a source, use it for all
+            const value = processMapping(article, mappings[0], article._sourceInfo);
+            mappedArticle = setValueAtPath(mappedArticle, targetPath, value);
+          }
+          // If no matching mapping, the field remains unmapped for this article
+        });
+        
+        return mappedArticle;
+      });
+      
+      // Apply output wrapper if enabled
+      return applyOutputWrapper(mappedArticles, sources);
+      
+    } else if (sources.length === 1) {
+      // SINGLE SOURCE MODE
+      console.log('Single source mode');
+      const sourceInfo = sources[0];
+      const sourceId = sourceInfo.id;
+      
+      if (!sampleData[sourceId]) {
+        console.warn(`No sample data for source: ${sourceId}`);
+        return null;
+      }
+      
+      // Get the actual data
+      let sourceData = sampleData[sourceId];
+      
+      // Navigate to the path if specified
+      if (sourceInfo.primaryPath) {
+        sourceData = getValueFromPath(sourceData, sourceInfo.primaryPath);
+      }
+      
+      console.log('Source data type:', Array.isArray(sourceData) ? 'array' : typeof sourceData);
+      
+      // Process the mapped data
+      let mappedData;
+      
+      if (Array.isArray(sourceData)) {
+        // Map array items
+        mappedData = sourceData.slice(0, 5).map(item => {
+          let result = {};
+          
+          // Apply each mapping
+          config.fieldMappings.forEach(mapping => {
+            const value = processMapping(item, mapping, sourceInfo);
+            result = setValueAtPath(result, mapping.targetPath, value);
+          });
+          
+          return result;
+        });
+      } else if (sourceData && typeof sourceData === 'object') {
+        // Map single object
         let result = {};
         
-        // Apply each mapping
         config.fieldMappings.forEach(mapping => {
-          const value = processMapping(item, mapping, sourceInfo);
+          const value = processMapping(sourceData, mapping, sourceInfo);
           result = setValueAtPath(result, mapping.targetPath, value);
         });
         
-        return result;
-      });
+        mappedData = result;
+      } else {
+        console.warn('Source data is not an object or array');
+        return null;
+      }
+      
+      // Apply output wrapper if enabled
+      return applyOutputWrapper(mappedData, [sourceInfo]);
+      
     } else {
-      // Map single object
-      let result = {};
+      // SEPARATE MODE: Keep sources separate
+      console.log('Separate mode - keeping sources independent');
+      const result: Record<string, any> = {};
       
-      config.fieldMappings.forEach(mapping => {
-        const value = processMapping(sourceData, mapping, sourceInfo);
-        result = setValueAtPath(result, mapping.targetPath, value);
+      sources.forEach(sourceInfo => {
+        if (!sampleData[sourceInfo.id]) {
+          console.warn(`No sample data for source: ${sourceInfo.id}`);
+          return;
+        }
+        
+        let sourceData = sampleData[sourceInfo.id];
+        
+        // Navigate to the path if specified
+        if (sourceInfo.primaryPath) {
+          sourceData = getValueFromPath(sourceData, sourceInfo.primaryPath);
+        }
+        
+        // Process mappings for this source
+        let mappedData;
+        
+        if (Array.isArray(sourceData)) {
+          mappedData = sourceData.slice(0, 5).map(item => {
+            let itemResult = {};
+            
+            // Only apply mappings for this source
+            config.fieldMappings
+              .filter(m => m.sourceId === sourceInfo.id)
+              .forEach(mapping => {
+                const value = processMapping(item, mapping, sourceInfo);
+                itemResult = setValueAtPath(itemResult, mapping.targetPath, value);
+              });
+            
+            return itemResult;
+          });
+        } else {
+          let objectResult = {};
+          
+          config.fieldMappings
+            .filter(m => m.sourceId === sourceInfo.id)
+            .forEach(mapping => {
+              const value = processMapping(sourceData, mapping, sourceInfo);
+              objectResult = setValueAtPath(objectResult, mapping.targetPath, value);
+            });
+          
+          mappedData = objectResult;
+        }
+        
+        // Store under source name or ID
+        const key = sourceInfo.name || sourceInfo.id;
+        result[key] = mappedData;
       });
       
-      mappedData = result;
+      // Apply output wrapper if enabled
+      return applyOutputWrapper(result, sources);
     }
-    
-    // Apply output wrapper if enabled
+  }, [config, sampleData, processMapping]);
+
+  // Helper function to apply output wrapper
+  const applyOutputWrapper = (data: any, sources: any[]) => {
     if (config.outputWrapper?.enabled) {
       let wrappedOutput: any = {};
       
@@ -146,17 +307,28 @@ export function useMappingEngine(
         }
         
         if (config.outputWrapper.metadataFields?.source !== false) {
-          metadata.source = {
-            id: sourceId,
-            name: sourceInfo?.name || sourceId,
-            type: sourceInfo?.type || 'unknown',
-            category: sourceInfo?.category
-          };
+          metadata.sources = sources.map(s => ({
+            id: s.id,
+            name: s.name,
+            type: s.type,
+            category: s.category
+          }));
         }
         
-        if (config.outputWrapper.metadataFields?.count !== false && Array.isArray(mappedData)) {
-          metadata.count = mappedData.length;
-          metadata.totalCount = Array.isArray(sourceData) ? sourceData.length : 1;
+        if (config.outputWrapper.metadataFields?.count !== false) {
+          if (Array.isArray(data)) {
+            metadata.count = data.length;
+            metadata.sourceCounts = {};
+            // Count articles per source
+            sources.forEach(source => {
+              const sourceCount = Array.isArray(data) 
+                ? data.filter((item: any) => item._sourceInfo?.id === source.id).length
+                : 0;
+              metadata.sourceCounts[source.name] = sourceCount;
+            });
+          } else if (typeof data === 'object') {
+            metadata.count = Object.keys(data).length;
+          }
         }
         
         if (config.outputWrapper.metadataFields?.version) {
@@ -167,13 +339,13 @@ export function useMappingEngine(
       }
       
       // Add the actual data with the specified wrapper key
-      wrappedOutput[config.outputWrapper.wrapperKey || 'data'] = mappedData;
+      wrappedOutput[config.outputWrapper.wrapperKey || 'data'] = data;
       
       return wrappedOutput;
     }
     
-    return mappedData;
-  }, [config, sampleData, processMapping]);
+    return data;
+  };
 
   const validateMapping = useCallback((): {
     valid: boolean;
@@ -195,13 +367,25 @@ export function useMappingEngine(
       }
     });
     
-    // Check for duplicate target paths
-    const targetPaths = config.fieldMappings.map(m => m.targetPath);
-    const duplicates = targetPaths.filter(
-      (path, index) => targetPaths.indexOf(path) !== index
-    );
-    if (duplicates.length > 0) {
-      errors.push(`Duplicate mappings for: ${duplicates.join(', ')}`);
+    // For combined mode with multiple sources, check if target fields have mappings from all sources
+    if (config.sourceSelection.mergeMode === 'combined' && config.sourceSelection.sources.length > 1) {
+      const targetFields = new Set(config.fieldMappings.map(m => m.targetPath));
+      targetFields.forEach(targetPath => {
+        const mappingsForTarget = config.fieldMappings.filter(m => m.targetPath === targetPath);
+        const sourcesForTarget = new Set(mappingsForTarget.map(m => m.sourceId));
+        const missingSources = config.sourceSelection.sources
+          .filter(s => !sourcesForTarget.has(s.id))
+          .map(s => s.name);
+        
+        if (missingSources.length > 0) {
+          warnings.push(`Field "${targetPath}" is not mapped for sources: ${missingSources.join(', ')}`);
+        }
+      });
+    }
+    
+    // Check if any sources are selected
+    if (!config.sourceSelection.sources || config.sourceSelection.sources.length === 0) {
+      errors.push('No data sources selected');
     }
     
     // Validate wrapper configuration
@@ -218,6 +402,14 @@ export function useMappingEngine(
         if (!hasMapping && !field.defaultValue) {
           warnings.push(`Optional field "${field.path}" is not mapped`);
         }
+      }
+    });
+    
+    // Check if mappings have valid source IDs
+    const sourceIds = new Set(config.sourceSelection.sources.map(s => s.id));
+    config.fieldMappings.forEach(mapping => {
+      if (mapping.sourceId && !sourceIds.has(mapping.sourceId)) {
+        errors.push(`Mapping references unknown source: ${mapping.sourceId}`);
       }
     });
     

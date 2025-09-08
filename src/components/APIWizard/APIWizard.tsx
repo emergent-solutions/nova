@@ -1,5 +1,5 @@
 // src/components/APIWizard/APIWizard.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   DialogStep,
   MultistepDialog,
@@ -201,6 +201,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
         const dataSourceData = {
           name: source.name,
           type: source.type,
+          category: source.category,
           active: true,
           api_config: source.type === 'api' ? source.api_config : null,
           database_config: source.type === 'database' ? source.database_config : null,
@@ -265,7 +266,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
     setNewDataSources(prev => prev.filter((_, i) => i !== index));
   };
 
-  const allDataSources = React.useMemo(() => {
+  const allDataSources = useMemo(() => {
     const selectedExisting = existingDataSources.filter(ds => 
       selectedDataSources.includes(ds.id)
     );
@@ -281,6 +282,16 @@ export const APIWizard: React.FC<APIWizardProps> = ({
   const validateDataSources = () => {
     return selectedDataSources.length > 0 || newDataSources.some(ds => ds.name && ds.type);
   };
+
+  const sampleData = useMemo(() => {
+    const result = {};
+    allDataSources.forEach(source => {
+      if (source.api_config?.sample_response) {
+        result[source.id] = source.api_config.sample_response;
+      }
+    });
+    return result;
+  }, [allDataSources]);
 
   const handleDeploy = async () => {
     try {
@@ -687,10 +698,12 @@ export const APIWizard: React.FC<APIWizardProps> = ({
       
       <DialogStep
         id="schema"
-        title="Output Schema"
+        title="Schema Design"
         panel={
           <SchemaDesignStep
             config={config}
+            dataSources={[...existingDataSources, ...newDataSources.filter(ds => ds.id)]}
+            sampleData={sampleData} // You'll need to fetch/provide sample data
             onUpdate={updateConfig}
           />
         }
