@@ -412,7 +412,6 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({
           rightIcon="arrow-right"
           onClick={onNext}
           disabled={!canProceed}
-          large
         />
       </div>
     </div>

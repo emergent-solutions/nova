@@ -364,7 +364,6 @@ const DeploymentStep: React.FC<DeploymentStepProps> = ({
               onClick={handleDeploy}
               disabled={validation ? !validation.valid : false}
               icon="cloud-upload"
-              large
             />
           </>
         )}

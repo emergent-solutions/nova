@@ -272,7 +272,6 @@ const TestingStep: React.FC<TestingStepProps> = ({ config, onUpdate }) => {
           </FormGroup>
 
           <Button
-            large
             intent={Intent.PRIMARY}
             icon="play"
             text="Run Test"
