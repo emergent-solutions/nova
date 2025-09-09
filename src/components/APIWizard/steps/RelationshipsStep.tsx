@@ -216,7 +216,6 @@ const RelationshipsStep: React.FC<RelationshipsStepProps> = ({ config, onUpdate 
         large={false}
       >
         <Tab id="relationships" title="Relationships" />
-        <Tab id="concatenate" title="Combine Sources" />
       </Tabs>
 
       {activeTab === 'relationships' ? (

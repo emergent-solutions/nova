@@ -24,9 +24,8 @@ import {
 import { APIEndpointConfig } from '../../../types/schema.types';
 import { DataSource } from '../../../types/datasource.types';
 import { useFetchProxy } from '../../../hooks/useFetchProxy';
-import { JsonPathExplorer } from '../../JsonPathExplorer/JsonPathExplorer';
-import MultiSourceFieldMapper from '../../MultiSourceFieldMapper';
 import { JsonFieldMapper } from '../../JsonFieldMapper';
+import { OpenAPIImport } from '../components/OpenAPIImport';
 
 // Helper to extract field paths
 function extractFieldPaths(obj: any, prefix = ''): Array<{ path: string; display: string }> {
@@ -710,11 +709,6 @@ ${allItems.map((item, idx) => `
 };
 
 const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate }) => {
-  console.log('OutputFormatStep - config:', config);
-  console.log('OutputFormatStep - dataSources:', config.dataSources);
-  console.log('OutputFormatStep - dataSources length:', config.dataSources?.length);
-  console.log('OutputFormatStep - first data source:', config.dataSources?.[0]);
-
   const [loadingFields, setLoadingFields] = useState<string[]>([]);
   const [testingSource, setTestingSource] = useState<string | null>(null);
   const [discoveredFields, setDiscoveredFields] = useState<Record<string, string[]>>({});
@@ -734,21 +728,9 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
   });
   const [selectedDataSource, setSelectedDataSource] = useState<string>('');
   const [sampleData, setSampleData] = useState<Record<string, any>>({});
-  const [selectedTab, setSelectedTab] = useState('format');
-  const [enhancedMappings, setEnhancedMappings] = useState(() => {
-    // If you have existing simple mappings, convert them
-    if (config.fieldMappings && config.fieldMappings.length > 0) {
-      return config.fieldMappings.map(mapping => ({
-        outputField: mapping.target_field || mapping.outputField,
-        sourceId: mapping.source_id || config.dataSources[0]?.id,
-        sourceField: mapping.source_field || mapping.sourceField,
-        transform: mapping.transform_type || 'direct',
-        aggregation: 'first' as const
-      }));
-    }
-    return [];
-  });
-  const [jsonConfigMode, setJsonConfigMode] = useState<'simple' | 'advanced'>('simple');
+  const [jsonConfigMode, setJsonConfigMode] = useState<'simple' | 'advanced' | 'openapi'>('simple');
+  const [importedOpenAPISchema, setImportedOpenAPISchema] = useState<any>(null);
+
   const isInitialMount = useRef(true);
   
   const { fetchViaProxy } = useFetchProxy();
@@ -1278,10 +1260,80 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
                   }
                   value="advanced"
                 />
+                <Radio 
+                  label={
+                    <span>
+                      <strong>Import from OpenAPI/Swagger</strong>
+                      <br />
+                      <small className={Classes.TEXT_MUTED}>
+                        Import an existing API specification (OpenAPI 3.0, Swagger 2.0, or JSON Schema)
+                      </small>
+                    </span>
+                  }
+                  value="openapi"
+                />
               </RadioGroup>
             </FormGroup>
 
             <Divider style={{ margin: '20px 0' }} />
+
+            {/* OpenAPI Import Mode */}
+            {jsonConfigMode === 'openapi' && (
+              <div className="openapi-import-mode">
+                {!importedOpenAPISchema ? (
+                  <OpenAPIImport
+                    onImport={(schema, mappingConfig) => {
+                      setImportedOpenAPISchema(schema);
+                      updateFormatOption('importedSchema', schema);
+                      updateFormatOption('mappingConfig', mappingConfig);
+                      
+                      // Auto-generate field mappings based on imported schema
+                      generateFieldMappingsFromSchema(schema);
+                      
+                      AppToaster.show({
+                        message: 'Schema imported successfully',
+                        intent: Intent.SUCCESS
+                      });
+                    }}
+                    onCancel={() => setJsonConfigMode('simple')}
+                  />
+                ) : (
+                  <Card>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <h4>Imported Schema Active</h4>
+                      <Button
+                        minimal
+                        intent={Intent.DANGER}
+                        icon="trash"
+                        onClick={() => {
+                          setImportedOpenAPISchema(null);
+                          updateFormatOption('importedSchema', null);
+                          updateFormatOption('mappingConfig', null);
+                        }}
+                      >
+                        Remove Import
+                      </Button>
+                    </div>
+                    
+                    <Callout intent={Intent.SUCCESS} style={{ marginTop: 15 }}>
+                      Your OpenAPI schema has been imported and will be used as the output structure.
+                      Fields from your data sources will be automatically mapped to match this schema.
+                    </Callout>
+
+                    {/* Show field mapping interface */}
+                    <div style={{ marginTop: 20 }}>
+                      <h5>Field Mappings</h5>
+                      <FieldMappingInterface
+                        schema={importedOpenAPISchema}
+                        dataSources={config.dataSources}
+                        mappings={formatOptions.fieldMappings || []}
+                        onUpdate={(mappings) => updateFormatOption('fieldMappings', mappings)}
+                      />
+                    </div>
+                  </Card>
+                )}
+              </div>
+            )}
 
             {/* Simple Configuration Mode */}
             {jsonConfigMode === 'simple' ? (

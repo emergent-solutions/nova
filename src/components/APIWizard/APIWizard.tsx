@@ -15,7 +15,6 @@ import { APIEndpointConfig } from '../../types/schema.types';
 import DataSourcesStep from './steps/DataSourcesStep';
 import DataSourceConfigStep from './steps/DataSourceConfigStep';
 import RelationshipsStep from './steps/RelationshipsStep';
-import SchemaDesignStep from './steps/SchemaDesignStep';
 import OutputFormatStep from './steps/OutputFormatStep';
 import TransformationStep from './steps/TransformationStep';
 import AuthenticationStep from './steps/AuthenticationStep';
@@ -105,6 +104,8 @@ export const APIWizard: React.FC<APIWizardProps> = ({
   });
   const [isSavingDataSources, setIsSavingDataSources] = useState(false);
   const [pendingStepChange, setPendingStepChange] = useState<string | null>(null);
+  const [autoDraftId, setAutoDraftId] = useState<string | null>(null);
+
 
   // Force navigation to deployment step when in edit mode after dialog opens
   useEffect(() => {
@@ -293,6 +294,10 @@ export const APIWizard: React.FC<APIWizardProps> = ({
     return result;
   }, [allDataSources]);
 
+  const handleAutoDraftCreated = (draftId: string | null) => {
+    setAutoDraftId(draftId);
+  };  
+
   const handleDeploy = async () => {
     try {
       setIsDeploying(true);
@@ -307,45 +312,56 @@ export const APIWizard: React.FC<APIWizardProps> = ({
         type: 'custom',
         schema: {
           ...config.outputSchema,
-          // Make sure metadata includes all RSS settings
           metadata: {
             ...config.outputSchema?.metadata,
-            // Include any additional format-specific options that might be stored separately
           }
         },
         mapping: config.fieldMappings
       };
       
-      if (mode === 'edit' && existingEndpoint) {
-        // Update existing endpoint
+      // Check if we're updating an auto-draft or existing endpoint
+      const endpointToUpdate = autoDraftId ? 
+        { id: autoDraftId, isAutoDraft: true } : 
+        (mode === 'edit' && existingEndpoint ? existingEndpoint : null);
+      
+      if (endpointToUpdate) {
+        // Update existing endpoint or convert auto-draft to final
+        const updateData = {
+          name: config.name,
+          slug: config.slug,
+          description: config.description,
+          output_format: config.outputFormat,
+          schema_config: schemaConfig,
+          transform_config: {
+            transformations: config.transformations
+          },
+          relationship_config: {
+            relationships: config.relationships
+          },
+          auth_config: config.authentication,
+          cache_config: config.caching,
+          rate_limit_config: config.rateLimiting,
+          active: true,
+          is_draft: false, // Convert draft to final if it was an auto-draft
+          updated_at: new Date().toISOString()
+        };
+
         const { data, error } = await supabase
           .from('api_endpoints')
-          .update({
-            name: config.name,
-            slug: config.slug,
-            description: config.description,
-            output_format: config.outputFormat,
-            schema_config: schemaConfig,  // Use the updated schema config
-            transform_config: {
-              transformations: config.transformations
-            },
-            relationship_config: {
-              relationships: config.relationships
-            },
-            auth_config: config.authentication,
-            cache_config: config.caching,
-            rate_limit_config: config.rateLimiting,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', existingEndpoint.id)
+          .update(updateData)
+          .eq('id', endpointToUpdate.id)
           .select()
           .single();
-  
+
         if (error) throw error;
+        
+        // Clear auto-draft ID if we just converted it
+        if (endpointToUpdate.isAutoDraft) {
+          setAutoDraftId(null);
+        }
         
         // Handle data source updates for RSS multi-source
         if (config.outputFormat === 'rss' && config.outputSchema?.metadata?.sourceMappings) {
-          // Update api_endpoint_sources table with new sources
           const sourceMappings = config.outputSchema.metadata.sourceMappings;
           const enabledSources = sourceMappings.filter(m => m.enabled);
           
@@ -353,7 +369,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
           const { data: currentSources } = await supabase
             .from('api_endpoint_sources')
             .select('*')
-            .eq('endpoint_id', existingEndpoint.id);
+            .eq('endpoint_id', endpointToUpdate.id);
           
           // Delete removed sources
           const currentSourceIds = currentSources?.map(s => s.data_source_id) || [];
@@ -364,7 +380,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
             await supabase
               .from('api_endpoint_sources')
               .delete()
-              .eq('endpoint_id', existingEndpoint.id)
+              .eq('endpoint_id', endpointToUpdate.id)
               .in('data_source_id', toDelete);
           }
           
@@ -372,7 +388,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
           const toAdd = newSourceIds.filter(id => !currentSourceIds.includes(id));
           if (toAdd.length > 0) {
             const newRelations = toAdd.map((sourceId, index) => ({
-              endpoint_id: existingEndpoint.id,
+              endpoint_id: endpointToUpdate.id,
               data_source_id: sourceId,
               is_primary: false,
               sort_order: currentSources?.length + index || index
@@ -382,22 +398,88 @@ export const APIWizard: React.FC<APIWizardProps> = ({
               .from('api_endpoint_sources')
               .insert(newRelations);
           }
+        } else if (!endpointToUpdate.isAutoDraft) {
+          // For non-RSS endpoints that aren't auto-drafts, update data sources normally
+          // (Auto-drafts don't have data sources yet)
+          
+          // Your existing data source update logic here...
+        }
+        
+        // If this was an auto-draft, now link the data sources
+        if (endpointToUpdate.isAutoDraft) {
+          const createdDataSourceIds: string[] = [];
+          
+          // Create new data sources
+          for (const newDs of newDataSources) {
+            if (newDs.name && newDs.type && !newDs.id) {
+              const { data: existing } = await supabase
+                .from('data_sources')
+                .select('id')
+                .eq('name', newDs.name)
+                .eq('user_id', user.id)
+                .single();
+              
+              if (existing) {
+                createdDataSourceIds.push(existing.id);
+              } else {
+                const { data: createdDs, error } = await supabase
+                  .from('data_sources')
+                  .insert({
+                    name: newDs.name,
+                    type: newDs.type,
+                    category: newDs.category,
+                    active: true,
+                    api_config: newDs.api_config,
+                    database_config: newDs.database_config,
+                    file_config: newDs.file_config,
+                    user_id: user.id
+                  })
+                  .select()
+                  .single();
+                
+                if (error) throw error;
+                if (createdDs) {
+                  createdDataSourceIds.push(createdDs.id);
+                  newDs.id = createdDs.id;
+                }
+              }
+            } else if (newDs.id) {
+              createdDataSourceIds.push(newDs.id);
+            }
+          }
+
+          const allDataSourceIds = [...selectedDataSources, ...createdDataSourceIds];
+          
+          if (allDataSourceIds.length > 0) {
+            const sourceRelations = allDataSourceIds.map((sourceId, index) => ({
+              endpoint_id: data.id,
+              data_source_id: sourceId,
+              is_primary: index === 0,
+              sort_order: index
+            }));
+
+            await supabase
+              .from('api_endpoint_sources')
+              .insert(sourceRelations);
+          }
         }
         
         toaster.show({ 
-          message: 'Endpoint updated successfully', 
+          message: endpointToUpdate.isAutoDraft ? 
+            'Endpoint deployed successfully' : 
+            'Endpoint updated successfully', 
           intent: Intent.SUCCESS 
         });
         
         onComplete(data);
         onClose();
       } else {
+        // Create brand new endpoint (no auto-draft exists)
         const createdDataSourceIds: string[] = [];
-              
+        
+        // Your existing data source creation logic...
         for (const newDs of newDataSources) {
-          // Only create if it doesn't already have an ID and has required fields
           if (newDs.name && newDs.type && !newDs.id) {
-            // Check if a data source with the same name already exists
             const { data: existing } = await supabase
               .from('data_sources')
               .select('id')
@@ -406,11 +488,9 @@ export const APIWizard: React.FC<APIWizardProps> = ({
               .single();
             
             if (existing) {
-              // Use existing data source instead of creating duplicate
               createdDataSourceIds.push(existing.id);
               console.log(`Using existing data source: ${newDs.name}`);
             } else {
-              // Create new data source
               const { data: createdDs, error } = await supabase
                 .from('data_sources')
                 .insert({
@@ -429,12 +509,10 @@ export const APIWizard: React.FC<APIWizardProps> = ({
               if (error) throw error;
               if (createdDs) {
                 createdDataSourceIds.push(createdDs.id);
-                // Update the newDs with the created ID to prevent re-creation
                 newDs.id = createdDs.id;
               }
             }
           } else if (newDs.id) {
-            // If it already has an ID, just use it
             createdDataSourceIds.push(newDs.id);
           }
         }
@@ -448,11 +526,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
             slug: config.slug,
             description: config.description,
             output_format: config.outputFormat,
-            schema_config: {
-              type: 'custom',
-              schema: config.outputSchema,
-              mapping: config.fieldMappings
-            },
+            schema_config: schemaConfig,
             transform_config: {
               transformations: config.transformations
             },
@@ -463,6 +537,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
             cache_config: config.caching,
             rate_limit_config: config.rateLimiting,
             active: true,
+            is_draft: false, // Explicitly not a draft
             user_id: user.id
           })
           .select()
@@ -470,6 +545,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
 
         if (error) throw error;
 
+        // Link data sources
         if (data && allDataSourceIds.length > 0) {
           const sourceRelations = allDataSourceIds.map((sourceId, index) => ({
             endpoint_id: data.id,
@@ -482,11 +558,11 @@ export const APIWizard: React.FC<APIWizardProps> = ({
             .from('api_endpoint_sources')
             .insert(sourceRelations);
 
+          // Handle RSS multi-source special case
           if (config.outputFormat === 'rss' && config.outputSchema?.metadata?.sourceMappings) {
             const sourceMappings = config.outputSchema.metadata.sourceMappings;
             const enabledRssSources = sourceMappings.filter(m => m.enabled);
             
-            // Get source IDs that are in RSS config but not in allDataSourceIds
             const rssSourceIds = enabledRssSources.map(s => s.sourceId);
             const additionalSources = rssSourceIds.filter(id => !allDataSourceIds.includes(id));
             
@@ -522,6 +598,27 @@ export const APIWizard: React.FC<APIWizardProps> = ({
     } finally {
       setIsDeploying(false);
     }
+  };
+
+  const handleClose = () => {
+    if (autoDraftId) {
+      // Clean up the auto-draft
+      const cleanup = async () => {
+        try {
+          await supabase
+            .from('api_endpoints')
+            .delete()
+            .eq('id', autoDraftId)
+            .eq('is_draft', true); // Safety check
+          
+          console.log('Auto-draft cleaned up on close:', autoDraftId);
+        } catch (error) {
+          console.error('Failed to cleanup auto-draft:', error);
+        }
+      };
+      cleanup();
+    }
+    onClose();
   };
 
   const isCurrentStepValid = (): boolean => {
@@ -571,7 +668,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
   return (
     <MultistepDialog
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={handleClose}
       title={mode === 'create' ? 'Create API Endpoint' : `Edit Endpoint: ${config.name}`}
       navigationPosition="left"
       showCloseButtonInFooter={false}
@@ -697,19 +794,6 @@ export const APIWizard: React.FC<APIWizardProps> = ({
       />
       
       <DialogStep
-        id="schema"
-        title="Schema Design"
-        panel={
-          <SchemaDesignStep
-            config={config}
-            dataSources={[...existingDataSources, ...newDataSources.filter(ds => ds.id)]}
-            sampleData={sampleData} // You'll need to fetch/provide sample data
-            onUpdate={updateConfig}
-          />
-        }
-      />
-      
-      <DialogStep
         id="format"
         title="Output Format"
         panel={
@@ -741,6 +825,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
           <AuthenticationStep
             config={config}
             onUpdate={updateConfig}
+            onDraftCreated={handleAutoDraftCreated}
           />
         }
       />

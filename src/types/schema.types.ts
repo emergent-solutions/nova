@@ -74,6 +74,10 @@ export interface FieldMapping {
     authentication: AuthConfig;
     caching: CacheConfig;
     rateLimiting: RateLimitConfig;
+    openAPIImport?: {
+      spec: any;
+      mappingConfig: any;
+    };
   }
   
   // Analytics types
