@@ -96,18 +96,18 @@ export function useMappingEngine(
       console.warn('No sources selected');
       return null;
     }
-
+  
     // Determine merge mode
     const mergeMode = config.sourceSelection.mergeMode || 'single';
     const sources = config.sourceSelection.sources;
     
     if (mergeMode === 'combined' && sources.length > 1) {
-      // COMBINED MODE: Merge articles from all sources into a single array
-      console.log('Combined mode - merging articles from multiple sources');
+      // COMBINED MODE: Merge data from all sources into a single array
+      console.log('Combined mode - merging data from multiple sources');
       
-      let allArticles: any[] = [];
+      let allItems: any[] = [];
       
-      // Collect articles from each source
+      // Collect items from each source
       sources.forEach(sourceInfo => {
         if (!sampleData[sourceInfo.id]) {
           console.warn(`No sample data for source: ${sourceInfo.id}`);
@@ -122,14 +122,14 @@ export function useMappingEngine(
           sourceData = getValueFromPath(sourceData, sourceInfo.primaryPath);
         }
         
-        console.log(`Source ${sourceInfo.name}: found ${Array.isArray(sourceData) ? sourceData.length : 0} items`);
+        console.log(`Source ${sourceInfo.name}: data type is ${Array.isArray(sourceData) ? 'array' : typeof sourceData}`);
         
-        // Add articles from this source
+        // Handle both arrays and single objects
         if (Array.isArray(sourceData)) {
-          // Add each article with its source information attached
-          sourceData.forEach(article => {
-            allArticles.push({
-              ...article,
+          // Add each item with its source information attached
+          sourceData.forEach(item => {
+            allItems.push({
+              ...item,
               _sourceInfo: {
                 id: sourceInfo.id,
                 name: sourceInfo.name,
@@ -137,14 +137,26 @@ export function useMappingEngine(
               }
             });
           });
+          console.log(`Added ${sourceData.length} items from ${sourceInfo.name}`);
+        } else if (sourceData && typeof sourceData === 'object') {
+          // Handle single object as one item
+          allItems.push({
+            ...sourceData,
+            _sourceInfo: {
+              id: sourceInfo.id,
+              name: sourceInfo.name,
+              category: sourceInfo.category
+            }
+          });
+          console.log(`Added single object from ${sourceInfo.name}`);
         }
       });
       
-      console.log(`Total articles collected: ${allArticles.length}`);
+      console.log(`Total items collected: ${allItems.length}`);
       
-      // Now map each article to the output structure
-      let mappedArticles = allArticles.slice(0, 10).map((article, index) => {
-        let mappedArticle = {};
+      // Now map each item to the output structure
+      let mappedItems = allItems.slice(0, 10).map((item, index) => {
+        let mappedItem = {};
         
         // Group mappings by target field to handle multiple sources mapping to same field
         const mappingsByTarget: Record<string, JsonFieldMapping[]> = {};
@@ -157,28 +169,28 @@ export function useMappingEngine(
         
         // Process each target field
         Object.entries(mappingsByTarget).forEach(([targetPath, mappings]) => {
-          // Find the mapping that matches this article's source
+          // Find the mapping that matches this item's source
           const matchingMapping = mappings.find(m => 
-            m.sourceId === article._sourceInfo.id
+            m.sourceId === item._sourceInfo.id
           );
           
           if (matchingMapping) {
-            // Use the mapping from the article's source
-            const value = processMapping(article, matchingMapping, article._sourceInfo);
-            mappedArticle = setValueAtPath(mappedArticle, targetPath, value);
+            // Use the mapping from the item's source
+            const value = processMapping(item, matchingMapping, item._sourceInfo);
+            mappedItem = setValueAtPath(mappedItem, targetPath, value);
           } else if (mappings.length === 1 && !mappings[0].sourceId) {
             // If there's only one mapping and it doesn't specify a source, use it for all
-            const value = processMapping(article, mappings[0], article._sourceInfo);
-            mappedArticle = setValueAtPath(mappedArticle, targetPath, value);
+            const value = processMapping(item, mappings[0], item._sourceInfo);
+            mappedItem = setValueAtPath(mappedItem, targetPath, value);
           }
-          // If no matching mapping, the field remains unmapped for this article
+          // If no matching mapping, the field remains unmapped for this item
         });
         
-        return mappedArticle;
+        return mappedItem;
       });
       
       // Apply output wrapper if enabled
-      return applyOutputWrapper(mappedArticles, sources);
+      return applyOutputWrapper(mappedItems, sources);
       
     } else if (sources.length === 1) {
       // SINGLE SOURCE MODE
@@ -226,7 +238,8 @@ export function useMappingEngine(
           result = setValueAtPath(result, mapping.targetPath, value);
         });
         
-        mappedData = result;
+        // For single objects, wrap in array if output template expects array
+        mappedData = config.sourceSelection.type === 'array' ? [result] : result;
       } else {
         console.warn('Source data is not an object or array');
         return null;
@@ -270,7 +283,8 @@ export function useMappingEngine(
             
             return itemResult;
           });
-        } else {
+        } else if (sourceData && typeof sourceData === 'object') {
+          // Handle single object
           let objectResult = {};
           
           config.fieldMappings

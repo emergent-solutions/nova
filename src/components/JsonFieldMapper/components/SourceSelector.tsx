@@ -49,9 +49,11 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({
       });
     }
     return paths;
+  });  
+  const [mergeMode, setMergeMode] = useState<'separate' | 'combined'>(() => {
+    // Initialize from existing selection if available
+    return selection.mergeMode || 'separate';
   });
-  
-  const [mergeMode, setMergeMode] = useState<'separate' | 'combined'>('separate');
 
   const toggleSource = (sourceId: string) => {
     const newSelected = new Set(selectedSources);
@@ -109,7 +111,6 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({
       const data = sampleData[sourceId];
       const path = paths[sourceId] || '';
       
-      // Determine type based on the data at the path
       let type: 'array' | 'object' = 'object';
       if (data && path) {
         const valueAtPath = getValueAtPath(data, path);
@@ -117,7 +118,7 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({
       } else if (data) {
         type = Array.isArray(data) ? 'array' : 'object';
       }
-
+  
       return {
         id: sourceId,
         name: source?.name || sourceId,
@@ -127,11 +128,11 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({
         dataType: type
       };
     });
-
+  
     onChange({
       type: sourcesArray.length > 0 ? sourcesArray[0].dataType : 'object',
       sources: sourcesArray,
-      mergeMode: sources.size > 1 ? mergeMode : 'single',
+      mergeMode: sources.size > 1 ? mergeMode : 'single', // Use current mergeMode state
       primaryPath: sourcesArray.length === 1 ? sourcesArray[0].primaryPath : ''
     });
   };
@@ -200,6 +201,45 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({
     Array.from(selectedSources).every(sourceId => 
       sourcePaths[sourceId] !== undefined || !sampleData[sourceId]
     );
+
+  const handleMergeModeChange = (newMergeMode: 'separate' | 'combined') => {
+    console.log('SourceSelector: Changing mergeMode to', newMergeMode);
+    
+    // Update local state
+    setMergeMode(newMergeMode);
+    
+    // Update the selection with all current data
+    const sourcesArray = Array.from(selectedSources).map(sourceId => {
+      const source = dataSources.find(ds => ds.id === sourceId);
+      const data = sampleData[sourceId];
+      const path = sourcePaths[sourceId] || '';
+      
+      let type: 'array' | 'object' = 'object';
+      if (data && path) {
+        const valueAtPath = getValueAtPath(data, path);
+        type = Array.isArray(valueAtPath) ? 'array' : 'object';
+      } else if (data) {
+        type = Array.isArray(data) ? 'array' : 'object';
+      }
+  
+      return {
+        id: sourceId,
+        name: source?.name || sourceId,
+        type: source?.type || 'unknown',
+        category: source?.category,
+        primaryPath: path,
+        dataType: type
+      };
+    });
+    
+    // Update the parent component with the new mergeMode
+    onChange({
+      type: sourcesArray.length > 0 ? sourcesArray[0].dataType : 'object',
+      sources: sourcesArray,
+      mergeMode: newMergeMode, // Use the new value
+      primaryPath: sourcesArray.length === 1 ? sourcesArray[0].primaryPath : ''
+    });
+  };
 
   return (
     <div className="source-selector">
@@ -345,8 +385,7 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({
                 type="radio"
                 checked={mergeMode === 'separate'}
                 onChange={() => {
-                  setMergeMode('separate');
-                  updateSelection(selectedSources, sourcePaths);
+                  handleMergeModeChange('separate');
                 }}
               />
               <span className="bp4-control-indicator" />
@@ -363,8 +402,7 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({
                 type="radio"
                 checked={mergeMode === 'combined'}
                 onChange={() => {
-                  setMergeMode('combined');
-                  updateSelection(selectedSources, sourcePaths);
+                  handleMergeModeChange('combined');
                 }}
               />
               <span className="bp4-control-indicator" />

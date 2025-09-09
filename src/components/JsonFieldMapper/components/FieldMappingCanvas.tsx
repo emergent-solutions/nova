@@ -12,10 +12,103 @@ import {
   Callout,
   Divider,
   Classes,
-  Collapse
+  Collapse,
+  Switch,
+  Position,
+  Tooltip
 } from '@blueprintjs/core';
 import { JsonFieldMapping } from '../../../types/jsonMapping.types';
 import { extractFieldPaths } from '../utils/pathHelpers';
+
+const styles = {
+  mappingContainer: {
+    display: 'flex',
+    gap: 20,
+    minHeight: 600,
+    position: 'relative' as const
+  },
+  
+  sourcePanel: {
+    flex: '0 0 45%',
+    maxHeight: '80vh',
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column' as const
+  },
+  
+  outputPanel: {
+    flex: '0 0 45%',
+    position: 'sticky' as const,
+    top: 20,
+    maxHeight: '80vh',
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column' as const
+  },
+  
+  panelContent: {
+    flex: 1,
+    overflowY: 'auto' as const,
+    padding: '10px'
+  },
+  
+  floatingOutputPanel: {
+    position: 'fixed' as const,
+    right: 20,
+    top: '50%',
+    transform: 'translateY(-50%)',
+    width: '400px',
+    maxHeight: '70vh',
+    zIndex: 1000,
+    boxShadow: '0 4px 16px rgba(0,0,0,0.2)'
+  },
+  
+  compactMode: {
+    padding: '8px',
+    marginBottom: '10px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    borderBottom: '1px solid #e1e8ed'
+  },
+  
+  dropZone: {
+    padding: 10,
+    margin: '8px 4px',
+    borderRadius: 4,
+    minHeight: 60,
+    transition: 'all 0.2s ease'
+  },
+  
+  dropZoneActive: {
+    backgroundColor: '#e3f2fd',
+    borderColor: '#2196f3',
+    transform: 'scale(1.02)'
+  },
+  
+  fieldItem: {
+    padding: '6px 10px',
+    margin: '4px 2px',
+    borderRadius: 3,
+    cursor: 'grab',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    fontSize: 12,
+    transition: 'all 0.2s ease'
+  },
+  
+  miniMap: {
+    position: 'fixed' as const,
+    bottom: 20,
+    right: 20,
+    width: 200,
+    padding: 10,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderRadius: 4,
+    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+  }
+};
 
 interface FieldMappingCanvasProps {
   sourceSelection: any;
@@ -50,10 +143,12 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
   onPrevious
 }) => {
   const [draggedField, setDraggedField] = useState<any>(null);
-  const [selectedMapping, setSelectedMapping] = useState<string | null>(null);
   const [expandedSources, setExpandedSources] = useState<Set<string>>(() => 
     new Set(sourceSelection.sources.map((s: any) => s.id))
   );
+  const [dragOverTarget, setDragOverTarget] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'side-by-side' | 'floating' | 'compact'>('side-by-side');
+  const [showMiniMap, setShowMiniMap] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
 
   // ============= SAFETY CHECKS =============
@@ -174,6 +269,16 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
   const fieldsBySource = getAllSourceFields();
 
   // ============= DRAG AND DROP HANDLERS =============
+  const handleDragOver = (e: React.DragEvent, targetPath: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    setDragOverTarget(targetPath);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverTarget(null);
+  };
+
   const handleDragStart = (field: SourceField) => {
     setDraggedField(field);
   };
@@ -182,13 +287,10 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
     setDraggedField(null);
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
-  };
-
   const handleDrop = (e: React.DragEvent, targetPath: string) => {
     e.preventDefault();
+    setDragOverTarget(null);
+
     if (!draggedField) return;
     
     // Check if this target already has a mapping from this source
@@ -241,18 +343,253 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
     return mappings.filter(m => m.targetPath === targetPath);
   };
 
+  const OutputFieldsPanel = ({ isFloating = false }) => (
+    <Card style={isFloating ? styles.floatingOutputPanel : {}}>
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        padding: '10px',
+        borderBottom: '1px solid #e1e8ed'
+      }}>
+        <h3 style={{ margin: 0 }}>Output Fields</h3>
+        {isFloating && (
+          <Button
+            minimal
+            icon="cross"
+            onClick={() => setViewMode('side-by-side')}
+          />
+        )}
+      </div>
+      
+      <div style={styles.panelContent}>
+        {outputTemplate.fields.map((field: any) => {
+          const targetMappings = getMappingsForTarget(field.path);
+          const hasMappings = targetMappings.length > 0;
+          const isDragOver = dragOverTarget === field.path;
+          
+          return (
+            <div
+              key={field.path}
+              onDragOver={(e) => handleDragOver(e, field.path)}
+              onDragLeave={handleDragLeave}
+              onDrop={(e) => handleDrop(e, field.path)}
+              style={{
+                ...styles.dropZone,
+                backgroundColor: isDragOver 
+                  ? '#e3f2fd' 
+                  : hasMappings 
+                    ? '#d4edda' 
+                    : '#f8f9fa',
+                border: `2px ${isDragOver 
+                  ? 'solid #2196f3' 
+                  : hasMappings 
+                    ? 'solid #28a745' 
+                    : 'dashed #dee2e6'}`,
+                ...(isDragOver ? styles.dropZoneActive : {})
+              }}
+            >
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'space-between', 
+                marginBottom: 8 
+              }}>
+                <div>
+                  <strong>{field.name || field.path}</strong>
+                  <Tag minimal style={{ marginLeft: 8 }}>{field.type}</Tag>
+                  {field.required && (
+                    <Tag minimal intent={Intent.DANGER} style={{ marginLeft: 4 }}>
+                      Required
+                    </Tag>
+                  )}
+                </div>
+              </div>
+              
+              {targetMappings.length > 0 ? (
+                <div style={{ fontSize: 12 }}>
+                  {targetMappings.map((mapping: any) => (
+                    <div key={mapping.id} style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: 8,
+                      padding: '4px',
+                      backgroundColor: 'rgba(255,255,255,0.8)',
+                      borderRadius: 3,
+                      marginBottom: 4
+                    }}>
+                      <Icon icon="link" size={10} />
+                      <span style={{ flex: 1 }}>
+                        <strong>{mapping.sourceName}:</strong> {mapping.sourcePath}
+                      </span>
+                      <Button
+                        minimal
+                        small
+                        icon="cross"
+                        onClick={() => removeMapping(mapping.id)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ 
+                  fontSize: 11, 
+                  color: '#8a8a8a',
+                  textAlign: 'center',
+                  padding: '10px'
+                }}>
+                  {isDragOver ? 'Drop here to map' : 'Drag a source field here'}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+  
+  const MiniMap = () => {
+    const mappedCount = outputTemplate.fields.filter((f: any) => 
+      mappings.some(m => m.targetPath === f.path)
+    ).length;
+    
+    const requiredMapped = outputTemplate.fields.filter((f: any) => 
+      f.required && mappings.some(m => m.targetPath === f.path)
+    ).length;
+    
+    const totalRequired = outputTemplate.fields.filter((f: any) => f.required).length;
+    
+    return (
+      <div style={styles.miniMap}>
+        <h5 style={{ margin: '0 0 10px 0' }}>Mapping Progress</h5>
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between',
+            fontSize: 12,
+            marginBottom: 4
+          }}>
+            <span>Overall</span>
+            <span>{mappedCount}/{outputTemplate.fields.length}</span>
+          </div>
+          <div style={{
+            height: 8,
+            backgroundColor: '#e0e0e0',
+            borderRadius: 4,
+            overflow: 'hidden'
+          }}>
+            <div style={{
+              height: '100%',
+              width: `${(mappedCount / outputTemplate.fields.length) * 100}%`,
+              backgroundColor: '#4caf50',
+              transition: 'width 0.3s ease'
+            }} />
+          </div>
+        </div>
+        
+        <div>
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between',
+            fontSize: 12,
+            marginBottom: 4
+          }}>
+            <span>Required</span>
+            <span>{requiredMapped}/{totalRequired}</span>
+          </div>
+          <div style={{
+            height: 8,
+            backgroundColor: '#e0e0e0',
+            borderRadius: 4,
+            overflow: 'hidden'
+          }}>
+            <div style={{
+              height: '100%',
+              width: `${totalRequired > 0 ? (requiredMapped / totalRequired) * 100 : 0}%`,
+              backgroundColor: requiredMapped === totalRequired ? '#4caf50' : '#ff9800',
+              transition: 'width 0.3s ease'
+            }} />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Helper function to render source fields
+  const renderSourceField = (field: SourceField) => {
+    const isMapped = mappings.some(
+      m => m.sourceId === field.sourceId && m.sourcePath === field.path
+    );
+    
+    return (
+      <div
+        key={field.path}
+        draggable
+        onDragStart={() => handleDragStart(field)}
+        onDragEnd={handleDragEnd}
+        style={{
+          ...styles.fieldItem,
+          backgroundColor: isMapped ? '#d4edda' : '#ffffff',
+          border: '1px solid #d3d8de',
+        }}
+      >
+        <Icon icon="drag-handle-vertical" size={10} />
+        <span style={{ flex: 1 }}>{field.path}</span>
+        <Tag minimal small>{field.type}</Tag>
+        {isMapped && <Icon icon="link" size={10} color="#28a745" />}
+      </div>
+    );
+  };
+
   return (
     <div className="field-mapping-canvas" ref={canvasRef}>
       <Callout intent={Intent.PRIMARY} icon="info-sign" style={{ marginBottom: 20 }}>
-        Drag fields from any source to the output fields. Multiple sources can map to the same output field - 
-        the appropriate source field will be used based on which source each item comes from.
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            Drag fields from sources to output fields. Multiple sources can map to the same output field.
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <Tooltip content="Side-by-side view">
+              <Button
+                minimal
+                icon="panel-stats"
+                active={viewMode === 'side-by-side'}
+                onClick={() => setViewMode('side-by-side')}
+              />
+            </Tooltip>
+            <Tooltip content="Floating output panel">
+              <Button
+                minimal
+                icon="application"
+                active={viewMode === 'floating'}
+                onClick={() => setViewMode('floating')}
+              />
+            </Tooltip>
+            <Tooltip content="Compact view">
+              <Button
+                minimal
+                icon="minimize"
+                active={viewMode === 'compact'}
+                onClick={() => setViewMode('compact')}
+              />
+            </Tooltip>
+            <Divider />
+            <Switch
+              checked={showMiniMap}
+              onChange={(e) => setShowMiniMap(e.target.checked)}
+              label="Mini Map"
+            />
+          </div>
+        </div>
       </Callout>
 
-      <div className="mapping-container" style={{ display: 'flex', gap: 20, minHeight: 600 }}>
-        {/* Left Panel: All Source Fields */}
-        <Card style={{ flex: '0 0 45%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <h3>Source Fields (All Sources)</h3>
-          <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div className="mapping-container" style={styles.mappingContainer}>
+        {/* Source Fields Panel */}
+        <Card style={viewMode === 'floating' ? { flex: '1 1 100%' } : styles.sourcePanel}>
+          <h3 style={{ padding: '10px', margin: 0, borderBottom: '1px solid #e1e8ed' }}>
+            Source Fields (All Sources)
+          </h3>
+          <div style={styles.panelContent}>
             {sourceSelection.sources.map((source: any) => {
               const isExpanded = expandedSources.has(source.id);
               const sourceFields = fieldsBySource[source.id] || [];
@@ -266,7 +603,8 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
                       gap: 10,
                       padding: '8px',
                       backgroundColor: '#f5f8fa',
-                      cursor: 'pointer'
+                      cursor: 'pointer',
+                      borderRadius: 4
                     }}
                     onClick={() => toggleSourceExpanded(source.id)}
                   >
@@ -274,95 +612,32 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
                     <Icon icon={
                       source.type === 'api' ? 'cloud' :
                       source.type === 'database' ? 'database' :
-                      source.type === 'file' ? 'document' :
-                      'data-connection'
+                      source.type === 'file' ? 'document' : 'folder-close'
                     } />
-                    <strong>{source.name}</strong>
-                    <Tag minimal>{source.type}</Tag>
-                    {source.category && (
-                      <Tag minimal icon="tag">{source.category}</Tag>
-                    )}
-                    <Tag minimal intent={Intent.PRIMARY}>
-                      {sourceFields.length} fields
-                    </Tag>
+                    <span style={{ flex: 1, fontWeight: 600 }}>{source.name}</span>
+                    <Tag minimal>{sourceFields.length} fields</Tag>
                   </div>
                   
                   <Collapse isOpen={isExpanded}>
-                    <div style={{ paddingLeft: 20, paddingTop: 10 }}>
+                    <div style={{ padding: '8px 8px 8px 32px' }}>
                       {/* Metadata Fields */}
                       <div style={{ marginBottom: 10 }}>
-                        <small style={{ color: '#5c7080', fontWeight: 'bold' }}>METADATA</small>
+                        <div style={{ fontSize: 11, color: '#8a8a8a', marginBottom: 4 }}>
+                          METADATA
+                        </div>
                         {sourceFields
                           .filter(f => f.isMetadata)
-                          .map(field => {
-                            const isMapped = mappings.some(
-                              m => m.sourceId === source.id && m.sourcePath === field.path
-                            );
-                            
-                            return (
-                              <div
-                                key={field.path}
-                                draggable
-                                onDragStart={() => handleDragStart(field)}
-                                onDragEnd={handleDragEnd}
-                                style={{
-                                  padding: 6,
-                                  margin: '4px 0',
-                                  backgroundColor: isMapped ? '#d4edda' : '#f8f9fa',
-                                  border: '1px solid #d3d8de',
-                                  borderRadius: 3,
-                                  cursor: 'grab',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: 8,
-                                  fontSize: 12
-                                }}
-                              >
-                                <Icon icon="drag-handle-vertical" size={10} />
-                                <span style={{ flex: 1 }}>{field.name}</span>
-                                <Tag minimal small>{field.type}</Tag>
-                                {isMapped && <Icon icon="link" size={10} color="#28a745" />}
-                              </div>
-                            );
-                          })}
+                          .map(field => renderSourceField(field))}
                       </div>
                       
                       {/* Data Fields */}
                       <div>
-                        <small style={{ color: '#5c7080', fontWeight: 'bold' }}>DATA FIELDS</small>
+                        <div style={{ fontSize: 11, color: '#8a8a8a', marginBottom: 4 }}>
+                          DATA FIELDS
+                        </div>
                         {sourceFields
                           .filter(f => !f.isMetadata)
-                          .map(field => {
-                            const isMapped = mappings.some(
-                              m => m.sourceId === source.id && m.sourcePath === field.path
-                            );
-                            
-                            return (
-                              <div
-                                key={field.path}
-                                draggable
-                                onDragStart={() => handleDragStart(field)}
-                                onDragEnd={handleDragEnd}
-                                style={{
-                                  padding: 6,
-                                  margin: '4px 0',
-                                  backgroundColor: isMapped ? '#d4edda' : '#ffffff',
-                                  border: '1px solid #d3d8de',
-                                  borderRadius: 3,
-                                  cursor: 'grab',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: 8,
-                                  fontSize: 12
-                                }}
-                              >
-                                <Icon icon="drag-handle-vertical" size={10} />
-                                <span style={{ flex: 1 }}>{field.path}</span>
-                                <Tag minimal small>{field.type}</Tag>
-                                {isMapped && <Icon icon="link" size={10} color="#28a745" />}
-                              </div>
-                            );
-                          })}
+                          .map(field => renderSourceField(field))}
                       </div>
                     </div>
                   </Collapse>
@@ -372,113 +647,26 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
           </div>
         </Card>
 
-        {/* Center Arrow */}
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <Icon icon="arrow-right" size={20} />
-        </div>
-
-        {/* Right Panel: Target Fields */}
-        <Card style={{ flex: '0 0 45%', overflow: 'hidden' }}>
-          <h3>Output Fields</h3>
-          <div style={{ height: 520, overflowY: 'auto' }}>
-            {outputTemplate.fields.map((field: any) => {
-              const targetMappings = getMappingsForTarget(field.path);
-              const hasMappings = targetMappings.length > 0;
-              
-              return (
-                <div
-                  key={field.path}
-                  onDragOver={handleDragOver}
-                  onDrop={(e) => handleDrop(e, field.path)}
-                  style={{
-                    padding: 10,
-                    margin: '8px 4px',
-                    backgroundColor: hasMappings ? '#d4edda' : '#f8f9fa',
-                    border: `2px ${hasMappings ? 'solid #28a745' : 'dashed #dee2e6'}`,
-                    borderRadius: 4,
-                    minHeight: 60
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <div>
-                      <strong>{field.name || field.path}</strong>
-                      <Tag minimal style={{ marginLeft: 8 }}>{field.type}</Tag>
-                      {field.required && (
-                        <Tag minimal intent={Intent.DANGER} style={{ marginLeft: 4 }}>
-                          Required
-                        </Tag>
-                      )}
-                    </div>
-                  </div>
-                  
-                  {targetMappings.length > 0 ? (
-                    <div>
-                      <small style={{ color: '#5c7080' }}>Mapped from:</small>
-                      {targetMappings.map(mapping => (
-                        <div 
-                          key={mapping.id}
-                          style={{ 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            gap: 8,
-                            marginTop: 4,
-                            padding: '4px 8px',
-                            backgroundColor: '#ffffff',
-                            borderRadius: 3,
-                            fontSize: 12
-                          }}
-                        >
-                          <Tag intent={Intent.SUCCESS} minimal>
-                            {mapping.sourceName}
-                          </Tag>
-                          <code>{mapping.sourcePath}</code>
-                          <Button
-                            minimal
-                            small
-                            icon="cross"
-                            intent={Intent.DANGER}
-                            onClick={() => removeMapping(mapping.id)}
-                            style={{ marginLeft: 'auto' }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{ color: '#6c757d', fontSize: 12 }}>
-                      Drag fields here from any source
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+        {/* Center Arrow (only for side-by-side view) */}
+        {viewMode === 'side-by-side' && (
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <Icon icon="arrow-right" size={20} />
           </div>
-        </Card>
+        )}
+
+        {/* Output Fields Panel */}
+        {viewMode === 'side-by-side' && (
+          <div style={styles.outputPanel}>
+            <OutputFieldsPanel />
+          </div>
+        )}
       </div>
 
-      {/* Summary Section */}
-      <Card style={{ marginTop: 20, backgroundColor: '#f5f8fa' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
-          <Icon icon="info-sign" />
-          <strong>Mapping Summary:</strong>
-          <Tag intent={Intent.SUCCESS}>
-            {mappings.length} total mappings
-          </Tag>
-          <Tag intent={Intent.WARNING}>
-            {outputTemplate.fields.filter((f: any) => 
-              f.required && !mappings.some(m => m.targetPath === f.path)
-            ).length} required fields unmapped
-          </Tag>
-          <Divider />
-          {sourceSelection.sources.map((source: any) => {
-            const sourceMappings = mappings.filter(m => m.sourceId === source.id);
-            return (
-              <Tag key={source.id} minimal>
-                {source.name}: {sourceMappings.length}
-              </Tag>
-            );
-          })}
-        </div>
-      </Card>
+      {/* Floating Output Panel */}
+      {viewMode === 'floating' && <OutputFieldsPanel isFloating={true} />}
+
+      {/* Mini Map */}
+      {showMiniMap && <MiniMap />}
 
       {/* Navigation */}
       <div style={{ marginTop: 20, display: 'flex', justifyContent: 'space-between' }}>

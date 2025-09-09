@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Card,
   Icon,
@@ -714,26 +714,96 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
   const [discoveredFields, setDiscoveredFields] = useState<Record<string, string[]>>({});
   const [format, setFormat] = useState(config.outputFormat || 'json');
   const [formatOptions, setFormatOptions] = useState<any>(() => {
-    const savedMetadata = config.outputSchema?.metadata || {};
+    const metadata = config.outputSchema?.metadata || {};
+    console.log('Loading format options from metadata:', metadata);
     
     return {
-      prettyPrint: true,
-      includeMetadata: true,
-      rootWrapper: 'data',
-      channelLink: getDefaultChannelLink(),
-      ...savedMetadata,  // This includes sourceMappings if they exist
-      // Ensure sourceMappings is always an array
-      sourceMappings: savedMetadata.sourceMappings || []
+      // RSS options
+      channelTitle: metadata.channelTitle || '',
+      channelDescription: metadata.channelDescription || '',
+      channelLink: metadata.channelLink || '',
+      titleField: metadata.titleField || '',
+      descriptionField: metadata.descriptionField || '',
+      linkField: metadata.linkField || '',
+      pubDateField: metadata.pubDateField || '',
+      guidField: metadata.guidField || '',
+      mergeStrategy: metadata.mergeStrategy || 'sequential',
+      maxItemsPerSource: metadata.maxItemsPerSource || 0,
+      maxTotalItems: metadata.maxTotalItems || 0,
+      sourceMappings: metadata.sourceMappings || [], // Load RSS multi-source mappings
+      
+      // JSON options
+      prettyPrint: metadata.prettyPrint !== false,
+      includeMetadata: metadata.includeMetadata || false,
+      wrapResponse: metadata.wrapResponse || false,
+      rootElement: metadata.rootElement || 'data',
+      jsonMappingConfig: metadata.jsonMappingConfig || null,
+      
+      // XML options
+      namespace: metadata.namespace || '',
+      includeDeclaration: metadata.includeDeclaration !== false,
+      useAttributes: metadata.useAttributes || false,
+      
+      // CSV options
+      delimiter: metadata.delimiter || ',',
+      includeHeaders: metadata.includeHeaders !== false,
+      
+      // Any other saved options
+      ...metadata
     };
   });
   const [selectedDataSource, setSelectedDataSource] = useState<string>('');
   const [sampleData, setSampleData] = useState<Record<string, any>>({});
-  const [jsonConfigMode, setJsonConfigMode] = useState<'simple' | 'advanced' | 'openapi'>('simple');
+  const [jsonConfigMode, setJsonConfigMode] = useState<'simple' | 'advanced' | 'openapi'>(() => {
+    // If we have saved field mappings or jsonMappingConfig, use advanced mode
+    if (config.fieldMappings?.length > 0 || config.outputSchema?.metadata?.jsonMappingConfig) {
+      return 'advanced';
+    }
+    return 'simple';
+  });
   const [importedOpenAPISchema, setImportedOpenAPISchema] = useState<any>(null);
+  const [sourceMappings, setSourceMappings] = useState(() => {
+    // Load saved RSS source mappings
+    const savedMappings = config.outputSchema?.metadata?.sourceMappings || [];
+    console.log('Loading RSS source mappings:', savedMappings);
+    
+    // If no saved mappings but we have data sources, create default mappings
+    if (savedMappings.length === 0 && config.dataSources?.length > 0) {
+      return config.dataSources.map(source => ({
+        sourceId: source.id,
+        sourceName: source.name,
+        enabled: false,
+        itemsPath: '',
+        fieldMappings: {
+          title: '',
+          description: '',
+          link: '',
+          pubDate: '',
+          guid: ''
+        }
+      }));
+    }
+    
+    return savedMappings;
+  });
 
   const isInitialMount = useRef(true);
   
   const { fetchViaProxy } = useFetchProxy();
+
+  useEffect(() => {
+    // Update the parent config with all our format options
+    onUpdate({
+      outputSchema: {
+        ...config.outputSchema,
+        metadata: {
+          ...config.outputSchema?.metadata,
+          ...formatOptions,
+          sourceMappings: sourceMappings // Include RSS mappings
+        }
+      }
+    });
+  }, [formatOptions, sourceMappings]);
 
   // Function to test a data source and discover its fields
   const testAndDiscoverFields = async (source: DataSource) => {
@@ -933,6 +1003,100 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
     }
   };
 
+
+    // Function to test all data sources at once
+    const testAllDataSources = async () => {
+      const sourcesToTest = config.dataSources.filter(source => {
+        const sourceFields = source.fields || discoveredFields[source.id] || [];
+        return sourceFields.length > 0; // Only re-test sources that already have fields
+      });
+  
+      if (sourcesToTest.length === 0) {
+        AppToaster.show({
+          message: 'No data sources with fields to re-test',
+          intent: 'warning'
+        });
+        return;
+      }
+  
+      setTestingSource('all'); // Special state to indicate all sources are being tested
+      
+      let successCount = 0;
+      let failCount = 0;
+  
+      for (const source of sourcesToTest) {
+        try {
+          await testAndDiscoverFields(source);
+          successCount++;
+        } catch (error) {
+          failCount++;
+          console.error(`Failed to test ${source.name}:`, error);
+        }
+      }
+  
+      setTestingSource(null);
+  
+      // Show summary toast
+      if (failCount === 0) {
+        AppToaster.show({
+          message: `Successfully re-tested all ${successCount} data sources`,
+          intent: 'success'
+        });
+      } else {
+        AppToaster.show({
+          message: `Re-tested ${successCount} sources, ${failCount} failed`,
+          intent: failCount > 0 ? 'warning' : 'success'
+        });
+      }
+    };
+  
+    // Function to discover fields for all data sources at once
+    const discoverAllFields = async () => {
+      const sourcesToDiscover = config.dataSources.filter(source => {
+        const sourceFields = source.fields || discoveredFields[source.id] || [];
+        return sourceFields.length === 0; // Only discover for sources without fields
+      });
+  
+      if (sourcesToDiscover.length === 0) {
+        AppToaster.show({
+          message: 'All data sources already have fields discovered',
+          intent: 'primary'
+        });
+        return;
+      }
+  
+      setTestingSource('all'); // Special state to indicate all sources are being tested
+      
+      let successCount = 0;
+      let failCount = 0;
+  
+      for (const source of sourcesToDiscover) {
+        try {
+          await testAndDiscoverFields(source);
+          successCount++;
+        } catch (error) {
+          failCount++;
+          console.error(`Failed to discover fields for ${source.name}:`, error);
+        }
+      }
+  
+      setTestingSource(null);
+  
+      // Show summary toast
+      if (failCount === 0) {
+        AppToaster.show({
+          message: `Successfully discovered fields for all ${successCount} data sources`,
+          intent: 'success'
+        });
+      } else {
+        AppToaster.show({
+          message: `Discovered fields for ${successCount} sources, ${failCount} failed`,
+          intent: failCount > 0 ? 'warning' : 'success'
+        });
+      }
+    };
+  
+
   const fetchFieldsForSource = async (sourceId: string) => {
     setLoadingFields([...loadingFields, sourceId]);
     
@@ -992,8 +1156,7 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
         format: format
       }
     });
-  };
-  
+  };  
 
   const getAllFields = () => {
     const fields: string[] = [];
@@ -1084,64 +1247,106 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
     return keys;
   };
 
-  const renderDataSourceTesting = () => (
-    <Card className="data-source-testing" style={{ marginBottom: 20 }}>
-      <h4>Data Source Fields</h4>
-      <div className="source-list">
-        {config.dataSources.map(source => {
-          const sourceFields = source.fields || discoveredFields[source.id] || [];
-          const hasFields = sourceFields.length > 0;
+  const renderDataSourceTesting = () => {
+    // Calculate if there are sources to re-test or discover
+    const sourcesWithFields = config.dataSources.filter(source => {
+      const sourceFields = source.fields || discoveredFields[source.id] || [];
+      return sourceFields.length > 0;
+    });
+
+    const sourcesWithoutFields = config.dataSources.filter(source => {
+      const sourceFields = source.fields || discoveredFields[source.id] || [];
+      return sourceFields.length === 0;
+    });
+
+    const isTestingAll = testingSource === 'all';
+    
+    return (
+      <Card className="data-source-testing" style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+          <h4 style={{ margin: 0 }}>Data Source Fields</h4>
           
-          return (
-            <div key={source.id} className="source-item" style={{ 
-              padding: '10px',
-              marginBottom: '10px',
-              border: '1px solid #e1e8ed',
-              borderRadius: '4px'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <strong>{source.name}</strong>
-                  <Tag minimal style={{ marginLeft: 8 }}>
-                    {source.type.toUpperCase()}
-                  </Tag>
-                  {hasFields && (
-                    <Tag minimal intent="success" style={{ marginLeft: 4 }}>
-                      {sourceFields.length} fields
+          {/* Action buttons for all sources */}
+          <div style={{ display: 'flex', gap: 10 }}>
+            {sourcesWithFields.length > 0 && (
+              <Button
+                intent="none"
+                icon="refresh"
+                text="Re-test All"
+                onClick={testAllDataSources}
+                loading={isTestingAll}
+                disabled={testingSource !== null && testingSource !== 'all'}
+              />
+            )}
+            {sourcesWithoutFields.length > 0 && (
+              <Button
+                intent="primary"
+                icon="search"
+                text="Discover All"
+                onClick={discoverAllFields}
+                loading={isTestingAll}
+                disabled={testingSource !== null && testingSource !== 'all'}
+              />
+            )}
+          </div>
+        </div>
+
+        <div className="source-list">
+          {config.dataSources.map(source => {
+            const sourceFields = source.fields || discoveredFields[source.id] || [];
+            const hasFields = sourceFields.length > 0;
+            
+            return (
+              <div key={source.id} className="source-item" style={{ 
+                padding: '10px',
+                marginBottom: '10px',
+                border: '1px solid #e1e8ed',
+                borderRadius: '4px'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <strong>{source.name}</strong>
+                    <Tag minimal style={{ marginLeft: 8 }}>
+                      {source.type.toUpperCase()}
                     </Tag>
-                  )}
+                    {hasFields && (
+                      <Tag minimal intent="success" style={{ marginLeft: 4 }}>
+                        {sourceFields.length} fields
+                      </Tag>
+                    )}
+                  </div>
+                  <Button
+                    small
+                    intent={hasFields ? "none" : "primary"}
+                    loading={testingSource === source.id}
+                    disabled={testingSource !== null && testingSource !== source.id}
+                    onClick={() => testAndDiscoverFields(source)}
+                    icon={hasFields ? "refresh" : "search"}
+                    text={hasFields ? "Re-test" : "Discover Fields"}
+                  />
                 </div>
-                <Button
-                  small
-                  intent={hasFields ? "none" : "primary"}
-                  loading={testingSource === source.id}
-                  disabled={testingSource !== null && testingSource !== source.id}
-                  onClick={() => testAndDiscoverFields(source)}
-                  icon={hasFields ? "refresh" : "search"}
-                  text={hasFields ? "Re-test" : "Discover Fields"}
-                />
+                
+                {hasFields && (
+                  <div style={{ marginTop: 8, fontSize: '12px', color: '#5c7080' }}>
+                    Fields: {sourceFields.slice(0, 5).join(', ')}
+                    {sourceFields.length > 5 && ` ... and ${sourceFields.length - 5} more`}
+                  </div>
+                )}
               </div>
-              
-              {hasFields && (
-                <div style={{ marginTop: 8, fontSize: '12px', color: '#5c7080' }}>
-                  Fields: {sourceFields.slice(0, 5).join(', ')}
-                  {sourceFields.length > 5 && ` ... and ${sourceFields.length - 5} more`}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      
-      {config.dataSources.length === 0 && (
-        <NonIdealState
-          icon="database"
-          title="No data sources"
-          description="Add data sources in the previous step"
-        />
-      )}
-    </Card>
-  );
+            );
+          })}
+        </div>
+        
+        {config.dataSources.length === 0 && (
+          <NonIdealState
+            icon="database"
+            title="No data sources"
+            description="Add data sources in the previous step"
+          />
+        )}
+      </Card>
+    );
+  };
 
   return (
     <div className="output-format-step">
@@ -1533,6 +1738,16 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
                       initialConfig={formatOptions.jsonMappingConfig}
                       onChange={(mappingConfig) => {
                         updateFormatOption('jsonMappingConfig', mappingConfig);
+
+                        onUpdate({
+                          outputSchema: {
+                            ...config.outputSchema,
+                            metadata: {
+                              ...config.outputSchema?.metadata,
+                              jsonMappingConfig: mappingConfig // This includes sourceSelection with mergeMode
+                            }
+                          }
+                        });
                         
                         // Only show toast after initial mount
                         if (!isInitialMount.current) {

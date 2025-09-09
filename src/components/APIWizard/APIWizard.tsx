@@ -54,22 +54,57 @@ export const APIWizard: React.FC<APIWizardProps> = ({
   // Initialize config with existing endpoint data if in edit mode
   const [config, setConfig] = useState<APIEndpointConfig>(() => {
     if (mode === 'edit' && existingEndpoint) {
+      console.log('Loading existing endpoint:', existingEndpoint);
+      
       // Extract all data sources that are connected to this endpoint
       const connectedDataSources = existingEndpoint.api_endpoint_sources?.map((s: any) => s.data_source) || [];
+      
+      // Extract metadata from schema_config
+      const schemaConfig = existingEndpoint.schema_config || {};
+      const metadata = schemaConfig.schema?.metadata || {};
+      
+      // For RSS endpoints, the sourceMappings are in metadata
+      const outputSchema = {
+        ...(schemaConfig.schema || {}),
+        metadata: {
+          ...metadata,
+          // Preserve RSS multi-source mappings
+          sourceMappings: metadata.sourceMappings || [],
+          // Preserve other format-specific settings
+          channelTitle: metadata.channelTitle,
+          channelDescription: metadata.channelDescription,
+          channelLink: metadata.channelLink,
+          titleField: metadata.titleField,
+          descriptionField: metadata.descriptionField,
+          linkField: metadata.linkField,
+          pubDateField: metadata.pubDateField,
+          mergeStrategy: metadata.mergeStrategy,
+          maxItemsPerSource: metadata.maxItemsPerSource,
+          maxTotalItems: metadata.maxTotalItems,
+          // JSON settings
+          prettyPrint: metadata.prettyPrint,
+          includeMetadata: metadata.includeMetadata,
+          wrapResponse: metadata.wrapResponse,
+          rootElement: metadata.rootElement,
+          jsonMappingConfig: metadata.jsonMappingConfig,
+          // Any other format options
+          ...metadata
+        }
+      };
+      
+      console.log('Loaded schema config:', schemaConfig);
+      console.log('Loaded metadata:', metadata);
+      console.log('Loaded field mappings:', schemaConfig.mapping);
       
       return {
         name: existingEndpoint.name || '',
         description: existingEndpoint.description || '',
         slug: existingEndpoint.slug || '',
-        dataSources: connectedDataSources,  // Use the actual data source objects
+        dataSources: connectedDataSources,
         relationships: existingEndpoint.relationship_config?.relationships || [],
         outputFormat: existingEndpoint.output_format || 'json',
-        outputSchema: existingEndpoint.schema_config?.schema || {
-          root: { key: 'root', type: 'object', children: [] },
-          version: '1.0.0',
-          format: 'json'
-        },
-        fieldMappings: existingEndpoint.schema_config?.mapping || [],
+        outputSchema: outputSchema,
+        fieldMappings: schemaConfig.mapping || [], // Load the field mappings
         transformations: existingEndpoint.transform_config?.transformations || [],
         authentication: existingEndpoint.auth_config || { required: false, type: 'none' },
         caching: existingEndpoint.cache_config || { enabled: false, ttl: 300 },
@@ -77,8 +112,29 @@ export const APIWizard: React.FC<APIWizardProps> = ({
       };
     }
     
+    // Default empty config for create mode
     return {
-      // ... default empty config
+      name: '',
+      description: '',
+      slug: '',
+      dataSources: [],
+      relationships: [],
+      outputFormat: 'json',
+      jsonMappingConfig: {
+        sourceSelection: {
+          mergeMode: 'separate'
+        }
+      },
+      outputSchema: {
+        root: { key: 'root', type: 'object', children: [] },
+        version: '1.0.0',
+        format: 'json'
+      },
+      fieldMappings: [],
+      transformations: [],
+      authentication: { required: false, type: 'none' },
+      caching: { enabled: false, ttl: 300 },
+      rateLimiting: { enabled: false, requests_per_minute: 60 }
     };
   });
   const [isDeploying, setIsDeploying] = useState(false);  
@@ -314,10 +370,23 @@ export const APIWizard: React.FC<APIWizardProps> = ({
           ...config.outputSchema,
           metadata: {
             ...config.outputSchema?.metadata,
+            jsonMappingConfig: {
+              ...config.outputSchema?.metadata?.jsonMappingConfig,
+              sourceSelection: {
+                ...config.outputSchema?.metadata?.jsonMappingConfig?.sourceSelection,
+                mergeMode: config.outputSchema?.metadata?.jsonMappingConfig?.sourceSelection?.mergeMode || 'separate'
+              }
+            },
+            // Ensure RSS mappings are preserved
+            sourceMappings: config.outputSchema?.metadata?.sourceMappings || [],
+            // Preserve all other metadata
+            ...config.outputSchema?.metadata
           }
         },
-        mapping: config.fieldMappings
+        mapping: config.fieldMappings || [] 
       };
+
+      console.log('Saving with schema config:', schemaConfig);
       
       // Check if we're updating an auto-draft or existing endpoint
       const endpointToUpdate = autoDraftId ? 
