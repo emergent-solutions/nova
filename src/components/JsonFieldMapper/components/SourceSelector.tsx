@@ -52,7 +52,7 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({
   });  
   const [mergeMode, setMergeMode] = useState<'separate' | 'combined'>(() => {
     // Initialize from existing selection if available
-    return selection.mergeMode || 'separate';
+    return selection.mergeMode || 'combined';
   });
 
   const toggleSource = (sourceId: string) => {
