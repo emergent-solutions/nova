@@ -107,7 +107,7 @@ const App: React.FC = () => {
             <Button 
               intent={Intent.SUCCESS}
               icon="add"
-              text="Create Endpoint"
+              text="Create Agent"
               onClick={handleCreateEndpoint}
             />
             <Navbar.Divider />
