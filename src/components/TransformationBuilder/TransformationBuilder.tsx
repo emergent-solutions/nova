@@ -19,6 +19,7 @@ import DateFormatOptions from './DateFormatOptions';
 import MathOperationOptions from './MathOperationOptions';
 import LookupTableEditor from './LookupTableEditor';
 import ArrayOperationOptions from './ArrayOperationOptions';
+import AITransformationOptions from './AITransformationOptions';
 import { getAvailableTransformations } from '../../utils/transformations';
 import './TransformationBuilder.css';
 
@@ -27,6 +28,7 @@ interface TransformationBuilderProps {
   targetType: string;
   value?: TransformationType;
   options?: Record<string, any>;
+  availableFields?: string[];
   onChange: (transform: TransformationType, options?: Record<string, any>) => void;
 }
 
@@ -35,9 +37,23 @@ const TransformationBuilder: React.FC<TransformationBuilderProps> = ({
   targetType,
   value,
   options = {},
+  availableFields = [],
   onChange
 }) => {
   const availableTransforms = getAvailableTransformations(sourceType, targetType);
+  
+  // Always add AI transformation as an option
+  if (!availableTransforms.find(t => t.id === 'ai-transform')) {
+    availableTransforms.push({
+      id: 'ai-transform',
+      name: 'AI Transform',
+      description: 'Use Claude AI to intelligently transform data',
+      icon: 'predictive-analysis',
+      sourceTypes: ['any'],
+      targetTypes: ['any']
+    });
+  }
+  
   const [selectedTransform, setSelectedTransform] = useState<TransformationType | null>(value || null);
   const [transformOptions, setTransformOptions] = useState(options);
 
@@ -57,11 +73,24 @@ const TransformationBuilder: React.FC<TransformationBuilderProps> = ({
     if (!selectedTransform) return null;
 
     switch (selectedTransform) {
+      case 'ai-transform':
+        return (
+          <AITransformationOptions
+            prompt={transformOptions.prompt || ''}
+            systemPrompt={transformOptions.systemPrompt}
+            outputFormat={transformOptions.outputFormat}
+            fieldContext={availableFields}
+            examples={transformOptions.examples}
+            cacheResults={transformOptions.cacheResults}
+            onChange={handleOptionsChange}
+          />
+        );
+
       case 'string-format':
         return (
           <StringFormatOptions
             template={transformOptions.template || ''}
-            availableFields={transformOptions.availableFields || []}
+            availableFields={availableFields}
             onChange={(template) => handleOptionsChange({ ...transformOptions, template })}
           />
         );
@@ -146,67 +175,8 @@ const TransformationBuilder: React.FC<TransformationBuilderProps> = ({
           </div>
         );
 
-      case 'substring':
-        return (
-          <div className="substring-options">
-            <FormGroup label="Start Index">
-              <NumericInput
-                value={transformOptions.start || 0}
-                onValueChange={(value) => handleOptionsChange({ 
-                  ...transformOptions, 
-                  start: value 
-                })}
-                min={0}
-              />
-            </FormGroup>
-            <FormGroup label="End Index (optional)">
-              <NumericInput
-                value={transformOptions.end}
-                onValueChange={(value) => handleOptionsChange({ 
-                  ...transformOptions, 
-                  end: value 
-                })}
-                min={0}
-                placeholder="Leave empty for end of string"
-              />
-            </FormGroup>
-          </div>
-        );
-
-      case 'replace':
-        return (
-          <div className="replace-options">
-            <FormGroup label="Find">
-              <InputGroup
-                value={transformOptions.find || ''}
-                onChange={(e) => handleOptionsChange({ 
-                  ...transformOptions, 
-                  find: e.target.value 
-                })}
-              />
-            </FormGroup>
-            <FormGroup label="Replace With">
-              <InputGroup
-                value={transformOptions.replace || ''}
-                onChange={(e) => handleOptionsChange({ 
-                  ...transformOptions, 
-                  replace: e.target.value 
-                })}
-              />
-            </FormGroup>
-            <Switch
-              label="Replace All Occurrences"
-              checked={transformOptions.replaceAll || false}
-              onChange={(e) => handleOptionsChange({ 
-                ...transformOptions, 
-                replaceAll: e.target.checked 
-              })}
-            />
-          </div>
-        );
-
-      case 'split':
       case 'join':
+      case 'split':
         return (
           <ArrayOperationOptions
             operation={selectedTransform}
@@ -233,8 +203,84 @@ const TransformationBuilder: React.FC<TransformationBuilderProps> = ({
           </FormGroup>
         );
 
+      case 'uppercase':
+      case 'lowercase':
+      case 'capitalize':
+      case 'trim':
+        // These transformations don't need options
+        return (
+          <Callout intent={Intent.PRIMARY}>
+            This transformation will be applied directly without additional configuration.
+          </Callout>
+        );
+
+      case 'substring':
+        return (
+          <>
+            <FormGroup label="Start Index">
+              <NumericInput
+                value={transformOptions.start || 0}
+                onValueChange={(value) => handleOptionsChange({
+                  ...transformOptions,
+                  start: value
+                })}
+                min={0}
+              />
+            </FormGroup>
+            <FormGroup label="Length" helperText="Leave empty for rest of string">
+              <NumericInput
+                value={transformOptions.length}
+                onValueChange={(value) => handleOptionsChange({
+                  ...transformOptions,
+                  length: value
+                })}
+                min={1}
+                placeholder="Optional"
+              />
+            </FormGroup>
+          </>
+        );
+
+      case 'replace':
+        return (
+          <>
+            <FormGroup label="Find">
+              <InputGroup
+                value={transformOptions.find || ''}
+                onChange={(e) => handleOptionsChange({
+                  ...transformOptions,
+                  find: e.target.value
+                })}
+                placeholder="Text to find"
+              />
+            </FormGroup>
+            <FormGroup label="Replace With">
+              <InputGroup
+                value={transformOptions.replace || ''}
+                onChange={(e) => handleOptionsChange({
+                  ...transformOptions,
+                  replace: e.target.value
+                })}
+                placeholder="Replacement text"
+              />
+            </FormGroup>
+            <Switch
+              label="Replace All Occurrences"
+              checked={transformOptions.replaceAll !== false}
+              onChange={(e) => handleOptionsChange({
+                ...transformOptions,
+                replaceAll: e.target.checked
+              })}
+            />
+          </>
+        );
+
       default:
-        return null;
+        return (
+          <Callout intent={Intent.WARNING}>
+            Configuration options for {selectedTransform} are not yet implemented.
+          </Callout>
+        );
     }
   };
 
@@ -250,11 +296,16 @@ const TransformationBuilder: React.FC<TransformationBuilderProps> = ({
               className={`transform-card ${selectedTransform === transform.id ? 'selected' : ''}`}
               onClick={() => handleTransformSelect(transform.id as TransformationType)}
             >
-              <Icon icon={transform.icon} size={20} />
+              <Icon icon={transform.icon as any} size={20} />
               <div className="transform-info">
                 <strong>{transform.name}</strong>
                 <small>{transform.description}</small>
               </div>
+              {transform.id === 'ai-transform' && (
+                <Tag intent={Intent.SUCCESS} minimal style={{ position: 'absolute', top: 5, right: 5 }}>
+                  AI
+                </Tag>
+              )}
             </Card>
           ))}
         </div>
@@ -265,18 +316,20 @@ const TransformationBuilder: React.FC<TransformationBuilderProps> = ({
           <h4>Configuration</h4>
           {renderTransformOptions()}
           
-          <div className="transform-preview">
-            <Callout intent={Intent.PRIMARY} icon="info-sign">
-              <strong>Example:</strong>
-              <div className="preview-example">
-                Input: <Tag>Sample Value</Tag>
-                <Icon icon="arrow-right" />
-                Output: <Tag intent={Intent.SUCCESS}>
-                  {getTransformPreview(selectedTransform, transformOptions, 'Sample Value')}
-                </Tag>
-              </div>
-            </Callout>
-          </div>
+          {selectedTransform !== 'ai-transform' && (
+            <div className="transform-preview">
+              <Callout intent={Intent.PRIMARY} icon="info-sign">
+                <strong>Example:</strong>
+                <div className="preview-example">
+                  Input: <Tag>Sample Value</Tag>
+                  <Icon icon="arrow-right" />
+                  Output: <Tag intent={Intent.SUCCESS}>
+                    {getTransformPreview(selectedTransform, transformOptions, 'Sample Value')}
+                  </Tag>
+                </div>
+              </Callout>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -300,6 +353,12 @@ function getTransformPreview(
       return input.trim();
     case 'string-format':
       return options.template?.replace('{{value}}', input) || input;
+    case 'substring':
+      return input.substring(options.start || 0, options.length ? (options.start || 0) + options.length : undefined);
+    case 'replace':
+      return options.replaceAll !== false 
+        ? input.replaceAll(options.find || '', options.replace || '')
+        : input.replace(options.find || '', options.replace || '');
     default:
       return `[${transform}]`;
   }

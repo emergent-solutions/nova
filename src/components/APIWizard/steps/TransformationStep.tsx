@@ -303,6 +303,7 @@ const TransformationStep: React.FC<TransformationStepProps> = ({ config, onUpdat
                   targetType={inferFieldType(editingTransform.target_field || editingTransform.source_field)}
                   value={editingTransform.type}
                   options={editingTransform.config}
+                  availableFields={availableFields.map(f => f.path)}
                   onChange={(type, options) => setEditingTransform({
                     ...editingTransform,
                     type,

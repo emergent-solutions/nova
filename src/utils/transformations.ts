@@ -8,6 +8,15 @@ export interface TransformDefinition {
   category: string;
 }
 
+// AI transformation is always available for any type
+const AI_TRANSFORM: TransformDefinition = {
+  id: 'ai-transform',
+  name: 'AI Transform',
+  description: 'Use Claude AI to intelligently transform data',
+  icon: 'predictive-analysis',
+  category: 'advanced'
+};
+
 export const TRANSFORMATIONS: Record<string, Record<string, TransformDefinition[]>> = {
   string: {
     string: [
@@ -27,47 +36,64 @@ export const TRANSFORMATIONS: Record<string, Record<string, TransformDefinition[
     ],
     boolean: [
       { id: 'is-empty', name: 'Is Empty?', description: 'Check if empty', icon: 'help', category: 'validation' },
-      { id: 'contains', name: 'Contains?', description: 'Check if contains text', icon: 'search', category: 'validation' }
+      { id: 'contains', name: 'Contains?', description: 'Check for text', icon: 'search', category: 'validation' }
     ],
-    date: [
-      { id: 'parse-date', name: 'Parse as Date', description: 'Convert to date', icon: 'calendar', category: 'conversion' }
+    array: [
+      { id: 'split', name: 'Split Text', description: 'Split into array', icon: 'split-columns', category: 'conversion' }
     ]
   },
   number: {
-    string: [
-      { id: 'to-string', name: 'To String', description: 'Convert to text', icon: 'font', category: 'conversion' },
-      { id: 'format-number', name: 'Format Number', description: 'Format with separators', icon: 'dollar', category: 'formatting' },
-      { id: 'to-currency', name: 'Currency', description: 'Format as currency', icon: 'bank-account', category: 'formatting' }
-    ],
     number: [
       { id: 'direct', name: 'Direct Copy', description: 'Copy value as-is', icon: 'arrow-right', category: 'basic' },
-      { id: 'round', name: 'Round', description: 'Round to decimals', icon: 'circle', category: 'math' },
+      { id: 'round', name: 'Round', description: 'Round to decimal places', icon: 'numerical', category: 'math' },
       { id: 'floor', name: 'Floor', description: 'Round down', icon: 'arrow-down', category: 'math' },
       { id: 'ceil', name: 'Ceiling', description: 'Round up', icon: 'arrow-up', category: 'math' },
-      { id: 'abs', name: 'Absolute', description: 'Remove sign', icon: 'timeline-bar-chart', category: 'math' },
+      { id: 'abs', name: 'Absolute', description: 'Remove negative', icon: 'plus', category: 'math' },
       { id: 'math-operation', name: 'Math Operation', description: 'Apply calculation', icon: 'calculator', category: 'math' }
     ],
+    string: [
+      { id: 'to-string', name: 'To String', description: 'Convert to text', icon: 'font', category: 'conversion' },
+      { id: 'format-number', name: 'Format Number', description: 'Format with locale', icon: 'numerical', category: 'formatting' },
+      { id: 'currency', name: 'Currency', description: 'Format as currency', icon: 'dollar', category: 'formatting' }
+    ],
     boolean: [
-      { id: 'greater-than', name: 'Greater Than', description: 'Compare greater', icon: 'chevron-right', category: 'comparison' },
-      { id: 'less-than', name: 'Less Than', description: 'Compare less', icon: 'chevron-left', category: 'comparison' },
-      { id: 'equals', name: 'Equals', description: 'Check equality', icon: 'equals', category: 'comparison' }
+      { id: 'is-positive', name: 'Is Positive?', description: 'Check if > 0', icon: 'chevron-right', category: 'validation' },
+      { id: 'is-zero', name: 'Is Zero?', description: 'Check if = 0', icon: 'equals', category: 'validation' }
     ]
   },
   date: {
+    date: [
+      { id: 'direct', name: 'Direct Copy', description: 'Copy value as-is', icon: 'arrow-right', category: 'basic' },
+      { id: 'date-format', name: 'Format Date', description: 'Change date format', icon: 'calendar', category: 'formatting' }
+    ],
     string: [
-      { id: 'date-format', name: 'Format Date', description: 'Custom date format', icon: 'calendar', category: 'formatting' },
-      { id: 'relative-time', name: 'Relative Time', description: 'e.g., 2 hours ago', icon: 'time', category: 'formatting' }
+      { id: 'date-format', name: 'Format Date', description: 'Format as string', icon: 'calendar', category: 'formatting' },
+      { id: 'relative-time', name: 'Relative Time', description: 'e.g., "2 days ago"', icon: 'time', category: 'formatting' }
     ],
     number: [
-      { id: 'timestamp', name: 'Unix Timestamp', description: 'Convert to timestamp', icon: 'numerical', category: 'conversion' },
-      { id: 'year', name: 'Extract Year', description: 'Get year', icon: 'calendar', category: 'extraction' },
-      { id: 'month', name: 'Extract Month', description: 'Get month', icon: 'calendar', category: 'extraction' },
-      { id: 'day', name: 'Extract Day', description: 'Get day', icon: 'calendar', category: 'extraction' }
+      { id: 'timestamp', name: 'Timestamp', description: 'Unix timestamp', icon: 'time', category: 'conversion' },
+      { id: 'day-of-week', name: 'Day of Week', description: 'Get day number', icon: 'calendar', category: 'extraction' },
+      { id: 'month', name: 'Month', description: 'Get month number', icon: 'calendar', category: 'extraction' },
+      { id: 'year', name: 'Year', description: 'Get year', icon: 'calendar', category: 'extraction' }
+    ]
+  },
+  boolean: {
+    boolean: [
+      { id: 'direct', name: 'Direct Copy', description: 'Copy value as-is', icon: 'arrow-right', category: 'basic' },
+      { id: 'invert', name: 'Invert', description: 'Flip true/false', icon: 'swap-horizontal', category: 'logic' }
+    ],
+    string: [
+      { id: 'to-string', name: 'To String', description: 'Convert to text', icon: 'font', category: 'conversion' },
+      { id: 'yes-no', name: 'Yes/No', description: 'Convert to Yes/No', icon: 'font', category: 'formatting' },
+      { id: 'custom-boolean', name: 'Custom Format', description: 'Custom true/false text', icon: 'font', category: 'formatting' }
+    ],
+    number: [
+      { id: 'to-number', name: 'To Number', description: '1 or 0', icon: 'numerical', category: 'conversion' }
     ]
   },
   array: {
     string: [
-      { id: 'join', name: 'Join', description: 'Join to string', icon: 'merge-columns', category: 'conversion' },
+      { id: 'join', name: 'Join', description: 'Join array items', icon: 'join', category: 'conversion' },
       { id: 'first', name: 'First Item', description: 'Get first item', icon: 'arrow-top-left', category: 'selection' },
       { id: 'last', name: 'Last Item', description: 'Get last item', icon: 'arrow-bottom-right', category: 'selection' }
     ],
@@ -92,14 +118,31 @@ export function getAvailableTransformations(
   sourceType: string, 
   targetType: string
 ): TransformDefinition[] {
-  return TRANSFORMATIONS[sourceType]?.[targetType] || [];
+  // Get type-specific transformations
+  const typeSpecific = TRANSFORMATIONS[sourceType]?.[targetType] || [];
+  
+  // Always include AI transformation as the first advanced option
+  const allTransforms = [...typeSpecific];
+  
+  // Add AI transform if not already present
+  if (!allTransforms.find(t => t.id === 'ai-transform')) {
+    // Insert AI transform at the beginning of advanced transformations
+    const advancedIndex = allTransforms.findIndex(t => t.category === 'advanced');
+    if (advancedIndex >= 0) {
+      allTransforms.splice(advancedIndex, 0, AI_TRANSFORM);
+    } else {
+      allTransforms.push(AI_TRANSFORM);
+    }
+  }
+  
+  return allTransforms;
 }
 
-export function applyTransformation(
+export async function applyTransformation(
   value: any,
   transformation: TransformationType,
   options: Record<string, any> = {}
-): any {
+): Promise<any> {
   switch (transformation) {
     case 'direct':
       return value;
@@ -147,7 +190,97 @@ export function applyTransformation(
     case 'timestamp':
       return new Date(value).getTime();
     
+    // AI transformation
+    case 'ai-transform':
+      // This will be handled by a separate async function
+      // that calls the Supabase edge function
+      return applyAITransformation(value, options);
+    
     default:
       return value;
+  }
+}
+
+// Separate async function for AI transformations
+async function applyAITransformation(
+  value: any,
+  options: Record<string, any>
+): Promise<any> {
+  // Check if we have cached result
+  if (options.cacheResults && options._cache) {
+    const cacheKey = `${JSON.stringify(value)}_${options.prompt}`;
+    if (options._cache[cacheKey]) {
+      return options._cache[cacheKey];
+    }
+  }
+  
+  try {
+    // Import Supabase client
+    const { supabase } = await import('../lib/supabase');
+    
+    // Build the full prompt
+    let fullPrompt = options.prompt || 'Transform this data';
+    fullPrompt = `Input: ${JSON.stringify(value)}\n\nTask: ${fullPrompt}`;
+    
+    // Add examples if provided
+    if (options.examples && options.examples.length > 0) {
+      fullPrompt += '\n\nExamples:\n';
+      options.examples.forEach((ex: any, idx: number) => {
+        fullPrompt += `Example ${idx + 1}:\nInput: ${JSON.stringify(ex.input)}\nOutput: ${JSON.stringify(ex.output)}\n\n`;
+      });
+    }
+    
+    // Add output format instruction
+    if (options.outputFormat === 'json') {
+      fullPrompt += '\n\nRespond with valid JSON only.';
+    } else if (options.outputFormat === 'structured') {
+      fullPrompt += '\n\nRespond with structured data matching the examples provided.';
+    }
+    
+    // Get session for auth
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    // Call the edge function
+    const response = await supabase.functions.invoke('claude', {
+      body: {
+        prompt: fullPrompt,
+        systemPrompt: options.systemPrompt || 'You are a data transformation assistant. Transform the input according to the instructions provided.',
+        outputFormat: options.outputFormat
+      },
+      headers: {
+        Authorization: `Bearer ${session?.access_token}`
+      }
+    });
+    
+    if (response.error) {
+      console.error('AI transformation error:', response.error);
+      return value; // Return original value on error
+    }
+    
+    // Parse the response based on output format
+    let result = response.data.response;
+    if (options.outputFormat === 'json' || options.outputFormat === 'structured') {
+      try {
+        // Try to extract JSON from the response
+        const jsonMatch = result.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+        if (jsonMatch) {
+          result = JSON.parse(jsonMatch[0]);
+        }
+      } catch (e) {
+        console.warn('Could not parse AI response as JSON');
+      }
+    }
+    
+    // Cache the result if caching is enabled
+    if (options.cacheResults) {
+      if (!options._cache) options._cache = {};
+      const cacheKey = `${JSON.stringify(value)}_${options.prompt}`;
+      options._cache[cacheKey] = result;
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('AI transformation failed:', error);
+    return value; // Return original value on error
   }
 }
