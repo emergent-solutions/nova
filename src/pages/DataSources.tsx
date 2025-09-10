@@ -64,7 +64,7 @@ const DataSourcesPage: React.FC = () => {
   const [formData, setFormData] = useState({
     name: '',
     type: 'api',
-    category: 'external',
+    category: '',  // Changed from 'external' to empty string
     active: true,
     api_config: {
       url: '',
@@ -129,7 +129,7 @@ const DataSourcesPage: React.FC = () => {
     setFormData({
       name: '',
       type: 'api',
-      category: 'external',
+      category: '',  // Changed from 'external' to empty string
       active: true,
       api_config: {
         url: '',
@@ -357,7 +357,7 @@ const DataSourcesPage: React.FC = () => {
                   </td>
                   <td>
                     <Tag minimal intent={source.category === 'internal' ? Intent.PRIMARY : Intent.NONE}>
-                      {source.category}
+                      {source.category || 'Uncategorized'}
                     </Tag>
                   </td>
                   <td>
@@ -456,16 +456,12 @@ const DataSourcesPage: React.FC = () => {
             />
           </FormGroup>
 
-          <FormGroup label="Category" labelFor="category">
-            <HTMLSelect
+          <FormGroup label="Category" labelFor="category" helperText="Optional category to organize your data sources">
+            <InputGroup
               id="category"
               value={formData.category}
               onChange={(e) => setFormData({...formData, category: e.target.value})}
-              options={[
-                { value: 'external', label: 'External' },
-                { value: 'internal', label: 'Internal' }
-              ]}
-              fill
+              placeholder="e.g., weather, finance, internal, external"
             />
           </FormGroup>
 
@@ -481,7 +477,7 @@ const DataSourcesPage: React.FC = () => {
           {/* API Configuration */}
           {formData.type === 'api' && (
             <>
-              <FormGroup label="URL" labelFor="url" labelInfo="(required)">
+              <FormGroup label="API URL" labelFor="url" labelInfo="(required)" helperText="Use relative URLs (/path) for same-host or full URLs">
                 <InputGroup
                   id="url"
                   value={formData.api_config.url}
@@ -489,7 +485,7 @@ const DataSourcesPage: React.FC = () => {
                     ...formData,
                     api_config: {...formData.api_config, url: e.target.value}
                   })}
-                  placeholder="https://api.example.com/data"
+                  placeholder="/static-data/data.json or https://api.example.com/data"
                 />
               </FormGroup>
 
