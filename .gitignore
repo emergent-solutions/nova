@@ -43,3 +43,7 @@ supabase/.temp/
 # Supabase
 .temp/
 .branches/
+
+# Docker volumes
+volumes/
+docker/volumes/

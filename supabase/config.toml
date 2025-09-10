@@ -1,0 +1,36 @@
+# A standard Supabase project configuration file
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[auth]
+enabled = true
+site_url = "http://192.168.68.50:5173"  # Replace with your machine's IP
+additional_redirect_urls = [
+  "http://localhost:5173/**",
+  "http://127.0.0.1:5173/**",
+  "http://192.168.68.50:5173/**",     # Your machine's IP
+  "http://192.168.*.*:5173/**",      # Allow any local network IP
+  "http://*:5173/**"                 # Allow any IP (less secure)
+]
+jwt_expiry = 3600
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false  # For easier testing
