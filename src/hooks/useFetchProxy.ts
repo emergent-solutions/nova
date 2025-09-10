@@ -31,6 +31,56 @@ export const useFetchProxy = () => {
     setError(null);
 
     try {
+      // Check if it's a local URL that we can fetch directly
+      const isLocalUrl = url.startsWith('/') || 
+                        url.includes('localhost') || 
+                        url.includes('192.168') ||
+                        url.includes('127.0.0.1');
+
+      // For local URLs in development, try direct fetch first
+      if (isLocalUrl && import.meta.env.DEV) {
+        try {
+          console.log('Attempting direct fetch for local URL:', url);
+          
+          const response = await fetch(url, {
+            method: options.method || 'GET',
+            headers: {
+              ...options.headers,
+              'Accept': 'application/json',
+            },
+            body: options.body ? JSON.stringify(options.body) : undefined
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP error ${response.status}`);
+          }
+
+          const contentType = response.headers.get('content-type') || 'application/json';
+          let data;
+          
+          if (contentType.includes('application/json')) {
+            data = await response.json();
+          } else {
+            data = await response.text();
+          }
+
+          return {
+            data,
+            status: response.status,
+            statusText: response.statusText,
+            contentType,
+            metadata: {
+              size: typeof data === 'string' ? data.length : JSON.stringify(data).length,
+              url,
+              fetchedAt: new Date().toISOString()
+            }
+          };
+        } catch (directFetchError) {
+          console.warn('Direct fetch failed, falling back to proxy:', directFetchError);
+          // Fall through to proxy method
+        }
+      }
+
       // Get the current session for authentication
       const { data: { session } } = await supabase.auth.getSession();
       
@@ -38,23 +88,26 @@ export const useFetchProxy = () => {
         throw new Error('Authentication required');
       }
 
+      // Construct the proxy URL based on environment
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || supabase.supabaseUrl;
+      const proxyUrl = `${supabaseUrl}/functions/v1/fetch-proxy`;
+      
+      console.log('Using proxy URL:', proxyUrl);
+
       // Make request to proxy function
-      const response = await fetch(
-        `${supabase.supabaseUrl}/functions/v1/fetch-proxy`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`
-          },
-          body: JSON.stringify({
-            url,
-            method: options.method || 'GET',
-            headers: options.headers || {},
-            body: options.body
-          })
-        }
-      );
+      const response = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({
+          url,
+          method: options.method || 'GET',
+          headers: options.headers || {},
+          body: options.body
+        })
+      });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -76,6 +129,7 @@ export const useFetchProxy = () => {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Proxy request failed';
       setError(message);
+      console.error('FetchProxy error:', err);
       throw err;
     } finally {
       setLoading(false);
@@ -85,7 +139,7 @@ export const useFetchProxy = () => {
   // Convenience method for fetching text files
   const fetchTextFile = async (url: string): Promise<string> => {
     const result = await fetchViaProxy(url);
-    return result.data;
+    return typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
   };
 
   // Convenience method for fetching JSON
