@@ -102,14 +102,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onCreateEndpoint }) => {
       <div className="dashboard-hero">
         <div className="hero-content">
           <h1>Welcome to Emergent Nova</h1>
-          <p>Create powerful API endpoints from your data sources</p>
+          <p>Create powerful agents to serve your data</p>
           <Button
             large
             intent={Intent.PRIMARY}
             icon="add"
             onClick={onCreateEndpoint}
           >
-            Create Your First Endpoint
+            Create Your First Agent
           </Button>
         </div>
         <div className="hero-illustration">
@@ -121,7 +121,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onCreateEndpoint }) => {
       <div className="stats-grid">
         <Card className="stat-card">
           <div className="stat-value">{endpoints.length}</div>
-          <div className="stat-label">Active Endpoints</div>
+          <div className="stat-label">Active Agents</div>
           <Icon icon="globe-network" className="stat-icon" />
         </Card>
         
@@ -129,7 +129,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onCreateEndpoint }) => {
           <div className="stat-value">
             {analytics?.total_requests || 0}
           </div>
-          <div className="stat-label">API Calls This Month</div>
+          <div className="stat-label">Calls This Month</div>
           <Icon icon="exchange" className="stat-icon" />
         </Card>
         
@@ -155,7 +155,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onCreateEndpoint }) => {
           {/* Recent Endpoints */}
           <Card className="recent-endpoints" elevation={Elevation.ONE}>
             <div className="card-header">
-              <H3>Recent Endpoints</H3>
+              <H3>Recent Agents</H3>
               <Button
                 minimal
                 icon="arrow-right"
@@ -197,7 +197,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onCreateEndpoint }) => {
                 description="Create your first API endpoint to get started"
                 action={
                   <Button intent={Intent.PRIMARY} onClick={onCreateEndpoint}>
-                    Create Endpoint
+                    Create Agent
                   </Button>
                 }
               />
@@ -287,7 +287,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onCreateEndpoint }) => {
                 minimal
                 alignText="left"
                 icon="add"
-                text="Create Endpoint"
+                text="Create Agent"
                 onClick={onCreateEndpoint}
               />
               <Button

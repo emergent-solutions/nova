@@ -46,7 +46,7 @@ const DeploymentStep: React.FC<DeploymentStepProps> = ({
     const warnings: string[] = [];
 
     // Required fields
-    if (!deploymentName) errors.push('Endpoint name is required');
+    if (!deploymentName) errors.push('Agent name is required');
     if (!deploymentSlug) errors.push('URL slug is required');
     if (!config.dataSources || config.dataSources.length === 0) {
       errors.push('At least one data source is required');
@@ -169,7 +169,7 @@ const DeploymentStep: React.FC<DeploymentStepProps> = ({
       <Card className="deployment-config">
         <h4>Deployment Settings</h4>
         
-        <FormGroup label="Endpoint Name" labelInfo="(required)">
+        <FormGroup label="Agent Name" labelInfo="(required)">
           <InputGroup
             value={deploymentName}
             onChange={(e) => {
@@ -178,7 +178,7 @@ const DeploymentStep: React.FC<DeploymentStepProps> = ({
                 setDeploymentSlug(generateSlugFromName(e.target.value));
               }
             }}
-            placeholder="My API Endpoint"
+            placeholder="My Agent"
           />
         </FormGroup>
 
@@ -344,7 +344,7 @@ const DeploymentStep: React.FC<DeploymentStepProps> = ({
           <div className="post-deployment-actions">
             <Button icon="document" text="View Documentation" />
             <Button icon="chart" text="View Analytics" />
-            <Button icon="play" text="Test Endpoint" />
+            <Button icon="play" text="Test Agent" />
           </div>
         </Card>
       )}
@@ -359,7 +359,7 @@ const DeploymentStep: React.FC<DeploymentStepProps> = ({
               intent={Intent.NONE}
             />
             <Button
-              text="Deploy Endpoint"
+              text="Deploy Agent"
               intent={Intent.PRIMARY}
               onClick={handleDeploy}
               disabled={validation ? !validation.valid : false}

@@ -13,15 +13,17 @@ import { useAuth } from './hooks/useAuth';
 import LoginForm from './components/LoginForm';
 import AuthCallback from './components/AuthCallback';
 import Dashboard from './pages/Dashboard';
-import EndpointsGrid from './pages/EndpointsGrid';
+import EndpointsPage from './pages/Endpoints';
 import Analytics from './pages/Analytics';
 import Documentation from './pages/Documentation';
 import { APIWizard } from './components/APIWizard/APIWizard';
+
 import './styles/global.css';
+import DataSourcesPage from './pages/DataSources';
 
 const App: React.FC = () => {
   const { user, loading, signOut } = useAuth();
-  const [currentView, setCurrentView] = useState<'dashboard' | 'endpoints' | 'analytics' | 'docs'>('dashboard');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'endpoints' | 'analytics' | 'docs' | 'data-sources'>('dashboard');
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardMode, setWizardMode] = useState<'create' | 'edit'>('create');
   const [editingEndpoint, setEditingEndpoint] = useState(null);
@@ -72,10 +74,17 @@ const App: React.FC = () => {
               />
               <Button 
                 className="bp5-minimal" 
-                icon="list" 
-                text="Endpoints"
+                icon="predictive-analysis" 
+                text="Agents"
                 active={currentView === 'endpoints'}
                 onClick={() => setCurrentView('endpoints')}
+              />
+              <Button 
+                className="bp5-minimal" 
+                icon="data-connection" 
+                text="Sources"
+                active={currentView === 'data-sources'}
+                onClick={() => setCurrentView('data-sources')}
               />
               <Button 
                 className="bp5-minimal" 
@@ -122,10 +131,14 @@ const App: React.FC = () => {
               currentView === 'dashboard' ? 
                 <Dashboard onCreateEndpoint={handleCreateEndpoint} /> :
               currentView === 'endpoints' ?
-                <EndpointsGrid onEditEndpoint={handleEditEndpoint} onCreateEndpoint={handleCreateEndpoint} refreshTrigger={refreshTrigger} /> :
+                <EndpointsPage onEditEndpoint={handleEditEndpoint} onCreateEndpoint={handleCreateEndpoint} refreshTrigger={refreshTrigger} /> :
               currentView === 'analytics' ?
                 <Analytics /> :
-                <Documentation />
+              currentView === 'docs' ?
+                <Documentation /> :
+              currentView === 'data-sources' ?
+                <DataSourcesPage /> :
+              <Dashboard onCreateEndpoint={handleCreateEndpoint} />
             } />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

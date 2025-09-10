@@ -535,8 +535,8 @@ export const APIWizard: React.FC<APIWizardProps> = ({
         
         toaster.show({ 
           message: endpointToUpdate.isAutoDraft ? 
-            'Endpoint deployed successfully' : 
-            'Endpoint updated successfully', 
+            'Agent deployed successfully' : 
+            'Agent updated successfully', 
           intent: Intent.SUCCESS 
         });
         
@@ -651,7 +651,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
         }
 
         toaster.show({ 
-          message: 'Endpoint created successfully', 
+          message: 'Agent created successfully', 
           intent: Intent.SUCCESS 
         });
 
@@ -738,7 +738,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
     <MultistepDialog
       isOpen={isOpen}
       onClose={handleClose}
-      title={mode === 'create' ? 'Create API Endpoint' : `Edit Endpoint: ${config.name}`}
+      title={mode === 'create' ? 'Create Agent' : `Edit Agent: ${config.name}`}
       navigationPosition="left"
       showCloseButtonInFooter={false}
       canEscapeKeyClose={true}
@@ -752,7 +752,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
         loading: isSavingDataSources // Show loading state when saving
       }}
       finalButtonProps={{
-        text: mode === 'edit' ? 'Save Changes' : 'Deploy Endpoint',
+        text: mode === 'edit' ? 'Save Changes' : 'Deploy Agent',
         intent: Intent.PRIMARY,
         loading: isDeploying,
         onClick: handleDeploy,
@@ -769,11 +769,11 @@ export const APIWizard: React.FC<APIWizardProps> = ({
                 <strong>Edit Mode:</strong> All steps are now accessible. Navigate using the sidebar or Previous/Next buttons.
               </Callout>
             )}
-            <FormGroup label="Endpoint Name" labelInfo="(required)">
+            <FormGroup label="Agent Name" labelInfo="(required)">
               <InputGroup
                 value={config.name}
                 onChange={(e) => updateConfig({ name: e.target.value })}
-                placeholder="My API Endpoint"
+                placeholder="My Agent"
               />
             </FormGroup>
             

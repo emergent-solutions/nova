@@ -17,14 +17,14 @@ import { supabase } from '../lib/supabase';
 import { APIEndpoint } from '../types/api.types';
 import { formatDistanceToNow } from 'date-fns';
 
-interface EndpointsGridProps {
+interface EndpointsPageProps {
   onEditEndpoint: (endpoint: APIEndpoint) => void;
   onCreateEndpoint: () => void;
 }
 
 const toaster = Toaster.create({ position: 'top' });
 
-const EndpointsGrid: React.FC<EndpointsGridProps> = ({ onEditEndpoint, onCreateEndpoint, refreshTrigger }) => {
+const EndpointsPage: React.FC<EndpointsPageProps> = ({ onEditEndpoint, onCreateEndpoint, refreshTrigger }) => {
   const [endpoints, setEndpoints] = useState<APIEndpoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -94,7 +94,7 @@ const EndpointsGrid: React.FC<EndpointsGridProps> = ({ onEditEndpoint, onCreateE
       if (error) throw error;
 
       toaster.show({
-        message: `Endpoint ${endpoint.active ? 'deactivated' : 'activated'}`,
+        message: `Agent ${endpoint.active ? 'deactivated' : 'activated'}`,
         intent: Intent.SUCCESS
       });
 
@@ -177,12 +177,12 @@ const EndpointsGrid: React.FC<EndpointsGridProps> = ({ onEditEndpoint, onCreateE
         alignItems: 'center',
         marginBottom: '24px'
       }}>
-        <h1 style={{ margin: 0 }}>API Endpoints</h1>
+        <h1 style={{ margin: 0 }}>Agents</h1>
         <Button
           large
           intent={Intent.PRIMARY}
           icon="add"
-          text="Create New Endpoint"
+          text="Create New Agent"
           onClick={onCreateEndpoint}
         />
       </div>
@@ -192,12 +192,12 @@ const EndpointsGrid: React.FC<EndpointsGridProps> = ({ onEditEndpoint, onCreateE
           <NonIdealState
             icon="inbox"
             title="No endpoints yet"
-            description="Create your first API endpoint to get started"
+            description="Create your first Agent to get started"
             action={
               <Button 
                 intent={Intent.PRIMARY} 
                 icon="add"
-                text="Create Endpoint"
+                text="Create Agent"
                 onClick={onCreateEndpoint}
               />
             }
@@ -209,7 +209,7 @@ const EndpointsGrid: React.FC<EndpointsGridProps> = ({ onEditEndpoint, onCreateE
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Endpoint URL</th>
+                <th>Agent URL</th>
                 <th>Format</th>
                 <th>Status</th>
                 <th>Cache</th>
@@ -320,7 +320,7 @@ const EndpointsGrid: React.FC<EndpointsGridProps> = ({ onEditEndpoint, onCreateE
       <Dialog
         isOpen={deleteDialogOpen}
         onClose={() => setDeleteDialogOpen(false)}
-        title="Delete Endpoint"
+        title="Delete Agent"
         icon="trash"
         canEscapeKeyClose
         canOutsideClickClose
@@ -352,4 +352,4 @@ const EndpointsGrid: React.FC<EndpointsGridProps> = ({ onEditEndpoint, onCreateE
   );
 };
 
-export default EndpointsGrid;
+export default EndpointsPage;

@@ -139,7 +139,7 @@ const LoginForm: React.FC = () => {
         <div className="login-header" style={{ textAlign: 'center', marginBottom: '32px' }}>
           <Icon icon="data-connection" size={40} />
           <h1 style={{ margin: '16px 0 8px', fontSize: '28px', fontWeight: 600 }}>Emergent Nova</h1>
-          <p style={{ color: '#5c7080', margin: 0 }}>Create powerful API endpoints from your data</p>
+          <p style={{ color: '#5c7080', margin: 0 }}>Create powerful agents to serve your data</p>
         </div>
 
         {error && (

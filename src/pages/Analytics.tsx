@@ -250,7 +250,7 @@ const Analytics: React.FC = () => {
 
       {/* Top Endpoints */}
       <Card elevation={Elevation.ONE}>
-        <h3>Top Endpoints</h3>
+        <h3>Top Agents</h3>
         <ResponsiveContainer width="100%" height={300}>
           <BarChart data={analyticsData.topEndpoints}>
             <CartesianGrid strokeDasharray="3 3" />

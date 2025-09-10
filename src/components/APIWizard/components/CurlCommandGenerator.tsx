@@ -234,7 +234,7 @@ print(response.json())`;
     <Card style={{ marginTop: 20 }}>
       <h4>
         <Icon icon="code" style={{ marginRight: 8 }} />
-        Test Your API Endpoint
+        Test Your Agent
       </h4>
       
       <Tabs 

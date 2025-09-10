@@ -195,7 +195,7 @@ const DataSourceConfigStep: React.FC<DataSourceConfigStepProps> = ({
     
     return (
       <>
-        <FormGroup label="API Endpoint" labelInfo="(required)">
+        <FormGroup label="Agent" labelInfo="(required)">
           <InputGroup
             value={source.api_config?.url || ''}
             onChange={(e) => onUpdate(index, {
