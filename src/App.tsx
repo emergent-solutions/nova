@@ -6,7 +6,8 @@ import {
   Alignment,
   ButtonGroup,
   Intent,
-  Spinner
+  Spinner,
+  Icon
 } from '@blueprintjs/core';
 import { supabase } from './lib/supabase';
 import { useAuth } from './hooks/useAuth';
@@ -59,8 +60,20 @@ const App: React.FC = () => {
       <div className="app">
         <Navbar className="bp5-dark">
           <Navbar.Group align={Alignment.LEFT}>
-            <Navbar.Heading>
-              <strong>Emergent Nova</strong>
+          <Navbar.Heading>
+              {/* Replace text with icon - you can change the icon to any BlueprintJS icon */}
+              <img 
+                src="/assets/EMERGENT_White_Alpha.png" 
+                alt="Emergent Nova"
+                style={{ 
+                  height: '32px', // Adjust size as needed
+                  width: 'auto',
+                  marginRight: '8px',
+                  objectFit: 'contain'
+                }} 
+              />
+              {/* Optional: Keep the text next to the icon */}
+              {/* <span style={{ marginLeft: '8px' }}>Emergent Nova</span> */}
             </Navbar.Heading>
             <Navbar.Divider />
             
