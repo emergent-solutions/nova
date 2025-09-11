@@ -19,9 +19,10 @@ import './Dashboard.css';
 
 interface DashboardProps {
   onCreateEndpoint: () => void;
+  onNavigate?: (view: string) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onCreateEndpoint }) => {
+const Dashboard: React.FC<DashboardProps> = ({ onCreateEndpoint, onNavigate }) => {
   const [loading, setLoading] = useState(true);
   const [endpoints, setEndpoints] = useState<APIEndpoint[]>([]);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
@@ -160,6 +161,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onCreateEndpoint }) => {
                 minimal
                 icon="arrow-right"
                 text="View All"
+                onClick={() => onNavigate?.('endpoints')}
               />
             </div>
             

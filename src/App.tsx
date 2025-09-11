@@ -142,7 +142,7 @@ const App: React.FC = () => {
             <Route path="/auth/callback" element={<AuthCallback />} />
             <Route path="/" element={
               currentView === 'dashboard' ? 
-                <Dashboard onCreateEndpoint={handleCreateEndpoint} /> :
+                <Dashboard onCreateEndpoint={handleCreateEndpoint} onNavigate={setCurrentView} /> :
               currentView === 'endpoints' ?
                 <EndpointsPage onEditEndpoint={handleEditEndpoint} onCreateEndpoint={handleCreateEndpoint} refreshTrigger={refreshTrigger} /> :
               currentView === 'analytics' ?
@@ -151,7 +151,7 @@ const App: React.FC = () => {
                 <Documentation /> :
               currentView === 'data-sources' ?
                 <DataSourcesPage /> :
-              <Dashboard onCreateEndpoint={handleCreateEndpoint} />
+              <Dashboard onCreateEndpoint={handleCreateEndpoint} onNavigate={setCurrentView} />
             } />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
