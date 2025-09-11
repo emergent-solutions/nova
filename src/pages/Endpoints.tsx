@@ -17,6 +17,9 @@ import { supabase } from '../lib/supabase';
 import { APIEndpoint } from '../types/api.types';
 import { formatDistanceToNow } from 'date-fns';
 
+type SortField = 'name' | 'slug' | 'output_format' | 'active' | 'created_at' | 'cache_enabled' | 'auth_required';
+type SortDirection = 'asc' | 'desc';
+
 interface EndpointsPageProps {
   onEditEndpoint: (endpoint: APIEndpoint) => void;
   onCreateEndpoint: () => void;
@@ -29,6 +32,8 @@ const EndpointsPage: React.FC<EndpointsPageProps> = ({ onEditEndpoint, onCreateE
   const [loading, setLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedEndpoint, setSelectedEndpoint] = useState<APIEndpoint | null>(null);
+  const [sortField, setSortField] = useState<SortField>('created_at');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
   useEffect(() => {
     loadEndpoints();
@@ -53,6 +58,55 @@ const EndpointsPage: React.FC<EndpointsPageProps> = ({ onEditEndpoint, onCreateE
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      // Toggle direction if same field
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      // New field, default to ascending
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  const sortedEndpoints = [...endpoints].sort((a, b) => {
+    let aVal = a[sortField];
+    let bVal = b[sortField];
+
+    // Handle cache_enabled and auth_required specially
+    if (sortField === 'cache_enabled') {
+      aVal = a.cache_config?.enabled;
+      bVal = b.cache_config?.enabled;
+    }
+    if (sortField === 'auth_required') {
+      aVal = a.auth_config?.required;
+      bVal = b.auth_config?.required;
+    }
+
+    // Handle null/undefined values
+    if (aVal === null || aVal === undefined) aVal = '';
+    if (bVal === null || bVal === undefined) bVal = '';
+
+    // Convert to string for comparison if needed
+    if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+    if (typeof bVal === 'string') bVal = bVal.toLowerCase();
+
+    if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+    if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const SortIndicator = ({ field }: { field: SortField }) => {
+    if (sortField !== field) return null;
+    return (
+      <Icon 
+        icon={sortDirection === 'asc' ? 'chevron-up' : 'chevron-down'} 
+        size={12}
+        style={{ marginLeft: '4px' }}
+      />
+    );
   };
 
   const handleDelete = async () => {
@@ -208,18 +262,53 @@ const EndpointsPage: React.FC<EndpointsPageProps> = ({ onEditEndpoint, onCreateE
           <HTMLTable interactive striped style={{ width: '100%' }}>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Agent URL</th>
-                <th>Format</th>
-                <th>Status</th>
-                <th>Cache</th>
-                <th>Auth</th>
-                <th>Created</th>
+                <th 
+                  onClick={() => handleSort('name')}
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                >
+                  Name <SortIndicator field="name" />
+                </th>
+                <th 
+                  onClick={() => handleSort('slug')}
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                >
+                  Agent URL <SortIndicator field="slug" />
+                </th>
+                <th 
+                  onClick={() => handleSort('output_format')}
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                >
+                  Format <SortIndicator field="output_format" />
+                </th>
+                <th 
+                  onClick={() => handleSort('active')}
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                >
+                  Status <SortIndicator field="active" />
+                </th>
+                <th 
+                  onClick={() => handleSort('cache_enabled')}
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                >
+                  Cache <SortIndicator field="cache_enabled" />
+                </th>
+                <th 
+                  onClick={() => handleSort('auth_required')}
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                >
+                  Auth <SortIndicator field="auth_required" />
+                </th>
+                <th 
+                  onClick={() => handleSort('created_at')}
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                >
+                  Created <SortIndicator field="created_at" />
+                </th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {endpoints.map(endpoint => (
+              {sortedEndpoints.map(endpoint => (
                 <tr key={endpoint.id}>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

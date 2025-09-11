@@ -50,6 +50,10 @@ interface DataSource {
   user_id: string;
 }
 
+// Add sorting types
+type SortField = 'name' | 'type' | 'category' | 'active' | 'created_at';
+type SortDirection = 'asc' | 'desc';
+
 const toaster = Toaster.create({ position: 'top' });
 
 const DataSourcesPage: React.FC = () => {
@@ -60,11 +64,15 @@ const DataSourcesPage: React.FC = () => {
   const [selectedDataSource, setSelectedDataSource] = useState<DataSource | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   
+  // Add sorting state
+  const [sortField, setSortField] = useState<SortField>('created_at');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  
   // Form state
   const [formData, setFormData] = useState({
     name: '',
     type: 'api',
-    category: '',  // Changed from 'external' to empty string
+    category: '',
     active: true,
     api_config: {
       url: '',
@@ -93,8 +101,7 @@ const DataSourcesPage: React.FC = () => {
     { value: 'graphql', label: 'GraphQL' }
   ];
 
-  const httpMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
-  const authTypes = ['none', 'bearer', 'api_key', 'basic', 'oauth2'];
+  const httpMethods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
 
   useEffect(() => {
     loadDataSources();
@@ -102,12 +109,9 @@ const DataSourcesPage: React.FC = () => {
 
   const loadDataSources = async () => {
     try {
+      setLoading(true);
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        toaster.show({ message: 'Please log in to view data sources', intent: Intent.WARNING });
-        setLoading(false);
-        return;
-      }
+      if (!user) return;
 
       const { data, error } = await supabase
         .from('data_sources')
@@ -117,11 +121,56 @@ const DataSourcesPage: React.FC = () => {
       if (error) throw error;
       setDataSources(data || []);
     } catch (error) {
-      console.error('Failed to load data sources:', error);
-      toaster.show({ message: 'Failed to load data sources', intent: Intent.DANGER });
+      console.error('Error loading data sources:', error);
+      toaster.show({ 
+        message: 'Failed to load data sources', 
+        intent: Intent.DANGER 
+      });
     } finally {
       setLoading(false);
     }
+  };
+
+  // Sorting function
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      // Toggle direction if same field
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      // New field, default to ascending
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // Sort the data sources
+  const sortedDataSources = [...dataSources].sort((a, b) => {
+    let aVal = a[sortField];
+    let bVal = b[sortField];
+
+    // Handle null/undefined values
+    if (aVal === null || aVal === undefined) aVal = '';
+    if (bVal === null || bVal === undefined) bVal = '';
+
+    // Convert to string for comparison if needed
+    if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+    if (typeof bVal === 'string') bVal = bVal.toLowerCase();
+
+    if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+    if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  // Helper to render sort indicator
+  const SortIndicator = ({ field }: { field: SortField }) => {
+    if (sortField !== field) return null;
+    return (
+      <Icon 
+        icon={sortDirection === 'asc' ? 'chevron-up' : 'chevron-down'} 
+        size={12}
+        style={{ marginLeft: '4px', verticalAlign: 'middle' }}
+      />
+    );
   };
 
   const handleCreate = () => {
@@ -129,7 +178,7 @@ const DataSourcesPage: React.FC = () => {
     setFormData({
       name: '',
       type: 'api',
-      category: '',  // Changed from 'external' to empty string
+      category: '',
       active: true,
       api_config: {
         url: '',
@@ -152,28 +201,28 @@ const DataSourcesPage: React.FC = () => {
     setDialogOpen(true);
   };
 
-  const handleEdit = (dataSource: DataSource) => {
+  const handleEdit = (source: DataSource) => {
     setIsEditing(true);
-    setSelectedDataSource(dataSource);
+    setSelectedDataSource(source);
     setFormData({
-      name: dataSource.name,
-      type: dataSource.type,
-      category: dataSource.category,
-      active: dataSource.active,
-      api_config: dataSource.api_config || {
+      name: source.name,
+      type: source.type,
+      category: source.category || '',
+      active: source.active,
+      api_config: source.api_config || {
         url: '',
         method: 'GET',
         headers: {},
         auth_type: 'none',
         data_path: ''
       },
-      database_config: dataSource.database_config || {
+      database_config: source.database_config || {
         host: '',
         port: 5432,
         database: '',
         query: ''
       },
-      file_config: dataSource.file_config || {
+      file_config: source.file_config || {
         file_path: '',
         format: 'json'
       }
@@ -184,20 +233,12 @@ const DataSourcesPage: React.FC = () => {
   const handleSave = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        toaster.show({ message: 'Please log in to save', intent: Intent.WARNING });
-        return;
-      }
+      if (!user) return;
 
       const dataToSave = {
-        name: formData.name,
-        type: formData.type,
-        category: formData.category,
-        active: formData.active,
-        api_config: formData.type === 'api' ? formData.api_config : null,
-        database_config: formData.type === 'database' ? formData.database_config : null,
-        file_config: formData.type === 'file' ? formData.file_config : null,
-        user_id: user.id
+        ...formData,
+        user_id: user.id,
+        updated_at: new Date().toISOString()
       };
 
       if (isEditing && selectedDataSource) {
@@ -207,21 +248,30 @@ const DataSourcesPage: React.FC = () => {
           .eq('id', selectedDataSource.id);
 
         if (error) throw error;
-        toaster.show({ message: 'Data source updated successfully', intent: Intent.SUCCESS });
+        toaster.show({ 
+          message: 'Data source updated successfully', 
+          intent: Intent.SUCCESS 
+        });
       } else {
         const { error } = await supabase
           .from('data_sources')
           .insert(dataToSave);
 
         if (error) throw error;
-        toaster.show({ message: 'Data source created successfully', intent: Intent.SUCCESS });
+        toaster.show({ 
+          message: 'Data source created successfully', 
+          intent: Intent.SUCCESS 
+        });
       }
 
       setDialogOpen(false);
       loadDataSources();
     } catch (error) {
-      console.error('Failed to save data source:', error);
-      toaster.show({ message: 'Failed to save data source', intent: Intent.DANGER });
+      console.error('Error saving data source:', error);
+      toaster.show({ 
+        message: 'Failed to save data source', 
+        intent: Intent.DANGER 
+      });
     }
   };
 
@@ -236,41 +286,50 @@ const DataSourcesPage: React.FC = () => {
 
       if (error) throw error;
 
-      toaster.show({ message: 'Data source deleted successfully', intent: Intent.SUCCESS });
+      toaster.show({ 
+        message: 'Data source deleted successfully', 
+        intent: Intent.SUCCESS 
+      });
+      setDeleteDialogOpen(false);
       loadDataSources();
     } catch (error) {
-      console.error('Failed to delete data source:', error);
-      toaster.show({ message: 'Failed to delete data source', intent: Intent.DANGER });
-    } finally {
-      setDeleteDialogOpen(false);
-      setSelectedDataSource(null);
+      console.error('Error deleting data source:', error);
+      toaster.show({ 
+        message: 'Failed to delete data source', 
+        intent: Intent.DANGER 
+      });
     }
   };
 
-  const toggleDataSourceStatus = async (dataSource: DataSource) => {
+  const toggleDataSourceStatus = async (source: DataSource) => {
     try {
       const { error } = await supabase
         .from('data_sources')
-        .update({ active: !dataSource.active })
-        .eq('id', dataSource.id);
+        .update({ active: !source.active })
+        .eq('id', source.id);
 
       if (error) throw error;
 
-      toaster.show({
-        message: `Data source ${dataSource.active ? 'deactivated' : 'activated'}`,
-        intent: Intent.SUCCESS
+      toaster.show({ 
+        message: `Data source ${!source.active ? 'activated' : 'deactivated'}`, 
+        intent: Intent.SUCCESS 
       });
-
       loadDataSources();
     } catch (error) {
-      console.error('Failed to toggle data source status:', error);
-      toaster.show({ message: 'Failed to update status', intent: Intent.DANGER });
+      console.error('Error toggling data source status:', error);
+      toaster.show({ 
+        message: 'Failed to update status', 
+        intent: Intent.DANGER 
+      });
     }
   };
 
-  const testConnection = async (dataSource: DataSource) => {
-    toaster.show({ message: 'Testing connection...', intent: Intent.PRIMARY });
-    
+  const testConnection = async (source: DataSource) => {
+    toaster.show({ 
+      message: 'Testing connection...', 
+      intent: Intent.NONE 
+    });
+
     // Simulate connection test
     setTimeout(() => {
       const success = Math.random() > 0.3;
@@ -334,17 +393,42 @@ const DataSourcesPage: React.FC = () => {
           <HTMLTable interactive striped style={{ width: '100%' }}>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Category</th>
-                <th>Status</th>
+                <th 
+                  onClick={() => handleSort('name')}
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                >
+                  Name <SortIndicator field="name" />
+                </th>
+                <th 
+                  onClick={() => handleSort('type')}
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                >
+                  Type <SortIndicator field="type" />
+                </th>
+                <th 
+                  onClick={() => handleSort('category')}
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                >
+                  Category <SortIndicator field="category" />
+                </th>
+                <th 
+                  onClick={() => handleSort('active')}
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                >
+                  Status <SortIndicator field="active" />
+                </th>
                 <th>Configuration</th>
-                <th>Created</th>
+                <th 
+                  onClick={() => handleSort('created_at')}
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                >
+                  Created <SortIndicator field="created_at" />
+                </th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {dataSources.map(source => (
+              {sortedDataSources.map(source => (
                 <tr key={source.id}>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -485,11 +569,11 @@ const DataSourcesPage: React.FC = () => {
                     ...formData,
                     api_config: {...formData.api_config, url: e.target.value}
                   })}
-                  placeholder="/static-data/data.json or https://api.example.com/data"
+                  placeholder="https://api.example.com/data"
                 />
               </FormGroup>
 
-              <FormGroup label="Method" labelFor="method">
+              <FormGroup label="HTTP Method" labelFor="method">
                 <HTMLSelect
                   id="method"
                   value={formData.api_config.method}
@@ -502,20 +586,7 @@ const DataSourcesPage: React.FC = () => {
                 />
               </FormGroup>
 
-              <FormGroup label="Authentication" labelFor="auth">
-                <HTMLSelect
-                  id="auth"
-                  value={formData.api_config.auth_type}
-                  onChange={(e) => setFormData({
-                    ...formData,
-                    api_config: {...formData.api_config, auth_type: e.target.value}
-                  })}
-                  options={authTypes.map(auth => ({ value: auth, label: auth }))}
-                  fill
-                />
-              </FormGroup>
-
-              <FormGroup label="Data Path" labelFor="dataPath" helperText="JSONPath to data (optional)">
+              <FormGroup label="Data Path" labelFor="dataPath" helperText="Optional: JSONPath to data in response (e.g., data.items)">
                 <InputGroup
                   id="dataPath"
                   value={formData.api_config.data_path}
@@ -523,7 +594,7 @@ const DataSourcesPage: React.FC = () => {
                     ...formData,
                     api_config: {...formData.api_config, data_path: e.target.value}
                   })}
-                  placeholder="e.g., data.results"
+                  placeholder="data.results"
                 />
               </FormGroup>
             </>
@@ -532,7 +603,7 @@ const DataSourcesPage: React.FC = () => {
           {/* Database Configuration */}
           {formData.type === 'database' && (
             <>
-              <FormGroup label="Host" labelFor="host" labelInfo="(required)">
+              <FormGroup label="Host" labelFor="host">
                 <InputGroup
                   id="host"
                   value={formData.database_config.host}
@@ -571,6 +642,7 @@ const DataSourcesPage: React.FC = () => {
 
               <FormGroup label="Query" labelFor="query">
                 <TextArea
+                  style={{ width: '100%' }}
                   id="query"
                   value={formData.database_config.query}
                   onChange={(e) => setFormData({
@@ -588,7 +660,7 @@ const DataSourcesPage: React.FC = () => {
           {/* File Configuration */}
           {formData.type === 'file' && (
             <>
-              <FormGroup label="File Path" labelFor="filePath" labelInfo="(required)">
+              <FormGroup label="File Path" labelFor="filePath">
                 <InputGroup
                   id="filePath"
                   value={formData.file_config.file_path}
@@ -596,7 +668,7 @@ const DataSourcesPage: React.FC = () => {
                     ...formData,
                     file_config: {...formData.file_config, file_path: e.target.value}
                   })}
-                  placeholder="/path/to/data.json"
+                  placeholder="/data/export.csv"
                 />
               </FormGroup>
 
@@ -608,11 +680,7 @@ const DataSourcesPage: React.FC = () => {
                     ...formData,
                     file_config: {...formData.file_config, format: e.target.value}
                   })}
-                  options={[
-                    { value: 'json', label: 'JSON' },
-                    { value: 'csv', label: 'CSV' },
-                    { value: 'xml', label: 'XML' }
-                  ]}
+                  options={['json', 'csv', 'xml', 'yaml']}
                   fill
                 />
               </FormGroup>
@@ -622,18 +690,19 @@ const DataSourcesPage: React.FC = () => {
 
         <div className={Classes.DIALOG_FOOTER}>
           <div className={Classes.DIALOG_FOOTER_ACTIONS}>
-            <Button onClick={() => setDialogOpen(false)} text="Cancel" />
+            <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
             <Button 
               intent={Intent.PRIMARY} 
               onClick={handleSave}
-              text={isEditing ? 'Update' : 'Create'}
-              icon="floppy-disk"
-            />
+              disabled={!formData.name}
+            >
+              {isEditing ? 'Update' : 'Create'}
+            </Button>
           </div>
         </div>
       </Dialog>
 
-      {/* Delete Dialog */}
+      {/* Delete Confirmation Dialog */}
       <Dialog
         isOpen={deleteDialogOpen}
         onClose={() => setDeleteDialogOpen(false)}
@@ -643,22 +712,13 @@ const DataSourcesPage: React.FC = () => {
         canOutsideClickClose
       >
         <div className={Classes.DIALOG_BODY}>
-          <p>
-            Are you sure you want to delete the data source <strong>{selectedDataSource?.name}</strong>?
-          </p>
-          <Callout intent={Intent.DANGER} icon="warning-sign">
-            This action cannot be undone. Any Agent using this data source may stop working.
-          </Callout>
+          <p>Are you sure you want to delete the data source <strong>{selectedDataSource?.name}</strong>?</p>
+          <p>This action cannot be undone.</p>
         </div>
         <div className={Classes.DIALOG_FOOTER}>
           <div className={Classes.DIALOG_FOOTER_ACTIONS}>
-            <Button onClick={() => setDeleteDialogOpen(false)} text="Cancel" />
-            <Button 
-              intent={Intent.DANGER} 
-              onClick={handleDelete}
-              text="Delete"
-              icon="trash"
-            />
+            <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+            <Button intent={Intent.DANGER} onClick={handleDelete}>Delete</Button>
           </div>
         </div>
       </Dialog>
