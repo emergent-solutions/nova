@@ -223,16 +223,6 @@ serve(async (req)=>{
         }
       });
     }
-    if (slug === 'test-encoding') {
-      const testData = {
-        message: "'The GOP's Elizabeth Warren'"
-      };
-      return new Response(JSON.stringify(testData), {
-        headers: {
-          'Content-Type': 'application/json; charset=utf-8'
-        }
-      });
-    }
     // Initialize authentication handler
     const authHandler = new AuthenticationHandler(endpoint.auth_config || {
       required: false,
