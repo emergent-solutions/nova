@@ -303,6 +303,7 @@ const RSSMultiSourceConfiguration: React.FC<{
         </FormGroup>
         <FormGroup label="Channel Description" labelInfo="(required)">
           <TextArea
+            style={{ width: '100%' }}
             value={formatOptions.channelDescription}
             onChange={(e) => updateFormatOption('channelDescription', e.target.value)}
             placeholder="Description of your feed"

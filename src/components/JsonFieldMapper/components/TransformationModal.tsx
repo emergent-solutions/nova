@@ -117,6 +117,7 @@ export const TransformationModal: React.FC<TransformationModalProps> = ({
             </FormGroup>
             <FormGroup label="Additional Fields" helperText="Comma-separated field paths">
               <TextArea
+                style={{ width: '100%' }}
                 value={transformConfig.fields || ''}
                 onChange={(e) => setTransformConfig({
                   ...transformConfig,
@@ -310,6 +311,7 @@ export const TransformationModal: React.FC<TransformationModalProps> = ({
           <>
             <FormGroup label="Lookup Table" helperText="JSON object mapping">
               <TextArea
+                style={{ width: '100%' }}
                 value={transformConfig.lookupTable || '{}'}
                 onChange={(e) => setTransformConfig({
                   ...transformConfig,
@@ -339,6 +341,7 @@ export const TransformationModal: React.FC<TransformationModalProps> = ({
             helperText="Use 'value' to reference the input"
           >
             <TextArea
+              style={{ width: '100%' }}
               value={transformConfig.expression || ''}
               onChange={(e) => setTransformConfig({
                 ...transformConfig,

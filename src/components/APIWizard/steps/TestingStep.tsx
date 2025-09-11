@@ -252,7 +252,7 @@ const TestingStep: React.FC<TestingStepProps> = ({ config, onUpdate }) => {
                 onChange={(e) => setTestBody(e.target.value)}
                 placeholder='{"key": "value"}'
                 rows={5}
-                style={{ fontFamily: 'monospace' }}
+                style={{ fontFamily: 'monospace', width: '100%' }}
               />
             </FormGroup>
           )}
@@ -267,7 +267,7 @@ const TestingStep: React.FC<TestingStepProps> = ({ config, onUpdate }) => {
               }}
               placeholder='{"Authorization": "Bearer token"}'
               rows={3}
-              style={{ fontFamily: 'monospace' }}
+              style={{ fontFamily: 'monospace', width: '100%' }}
             />
           </FormGroup>
 

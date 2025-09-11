@@ -227,6 +227,7 @@ const AITransformationOptions: React.FC<AITransformationOptionsProps> = ({
         helperText="Describe how to transform the data. Use {{field_name}} for placeholders."
       >
         <TextArea
+          style={{ width: '100%' }}
           value={localPrompt}
           onChange={(e) => setLocalPrompt(e.target.value)}
           placeholder="e.g., Extract the product name and price from this description"
@@ -264,6 +265,7 @@ const AITransformationOptions: React.FC<AITransformationOptionsProps> = ({
             helperText="Optional: Override the default system instructions"
           >
             <TextArea
+              style={{ width: '100%' }}
               value={localSystemPrompt}
               onChange={(e) => setLocalSystemPrompt(e.target.value)}
               placeholder="You are a helpful assistant that..."
@@ -326,6 +328,7 @@ const AITransformationOptions: React.FC<AITransformationOptionsProps> = ({
         <h4>Test Transformation</h4>
         <FormGroup label="Test Input">
           <TextArea
+            style={{ width: '100%' }}
             value={testInput}
             onChange={(e) => setTestInput(e.target.value)}
             placeholder="Enter sample data to test the transformation..."

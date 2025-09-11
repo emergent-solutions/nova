@@ -641,7 +641,8 @@ export const OutputTemplateBuilder: React.FC<OutputTemplateBuilderProps> = ({
                 rows={15}
                 style={{ 
                   fontFamily: 'monospace',
-                  fontSize: '12px'
+                  fontSize: '12px',
+                  width: '100%'
                 }}
                 fill
               />

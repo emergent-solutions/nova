@@ -56,6 +56,7 @@ const StringFormatOptions: React.FC<StringFormatOptionsProps> = ({
     <div className="string-format-options">
       <FormGroup label="Format Template">
         <TextArea
+          style={{ width: '100%' }}
           inputRef={textAreaRef}
           value={template}
           onChange={(e) => onChange(e.target.value)}
