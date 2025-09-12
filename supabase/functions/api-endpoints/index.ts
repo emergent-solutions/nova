@@ -380,7 +380,6 @@ serve(async (req)=>{
     });
   }
 });
-// ============= KEEP ALL YOUR EXISTING RSS LOGIC =============
 // Generate RSS feed for multi-source configuration
 async function generateRSSFeed(endpoint, dataSources, supabase) {
   const metadata = endpoint.schema_config?.schema?.metadata || {};
@@ -462,6 +461,15 @@ async function generateRSSFeed(endpoint, dataSources, supabase) {
   if (maxTotalItems > 0) {
     allItems = allItems.slice(0, maxTotalItems);
   }
+  // Apply transformation pipeline if configured
+  if (endpoint.transform_config?.transformations) {
+    console.log('Applying transformations to RSS items...');
+    allItems = await applyTransformationPipeline(
+      allItems,
+      endpoint.transform_config,
+      supabase
+    );
+  }
   console.log(`Generating RSS with ${allItems.length} total items`);
   // Generate RSS XML
   const rssXML = `<?xml version="1.0" encoding="UTF-8"?>
@@ -487,9 +495,9 @@ async function generateRSSFeed(endpoint, dataSources, supabase) {
 </rss>`;
   return rssXML;
 }
-// ============= ENHANCED JSON RESPONSE WITH FIELD MAPPING =============
 // Generate JSON response
 async function generateJSONResponse(endpoint, dataSources, supabase) {
+  let finalResult = {};
   // Handle different possible schema config structures
   const schemaConfig = endpoint.schema_config || {};
   const metadata = schemaConfig.schema?.metadata || schemaConfig.metadata || {};
@@ -505,13 +513,13 @@ async function generateJSONResponse(endpoint, dataSources, supabase) {
   if (jsonMappingConfig && jsonMappingConfig.fieldMappings && jsonMappingConfig.fieldMappings.length > 0) {
     console.log('Using advanced JSON field mapping (detected from jsonMappingConfig presence)');
     const result = await generateAdvancedJSONResponse(endpoint, dataSources, supabase, jsonMappingConfig);
-    return deepCleanObject(result);
+    finalResult = deepCleanObject(result);
   }
   // Check for explicit jsonConfigMode as fallback
   if (jsonMappingConfig?.fieldMappings?.length > 0) {
     console.log('Using advanced JSON field mapping (detected from jsonConfigMode)');
     const result = await generateAdvancedJSONResponse(endpoint, dataSources, supabase, jsonMappingConfig);
-    return deepCleanObject(result);
+    finalResult = deepCleanObject(result);
   }
   // Original JSON generation logic (backward compatibility)
   console.log('Using standard JSON generation');
@@ -567,9 +575,19 @@ async function generateJSONResponse(endpoint, dataSources, supabase) {
       };
     }
     wrapped[metadata.rootWrapper] = results;
-    return deepCleanObject(wrapped);
+    finalResult = deepCleanObject(wrapped);
   }
-  return deepCleanObject(results);
+  finalResult = deepCleanObject(results);
+
+  if (endpoint.transform_config?.transformations) {
+    console.log('Applying transformations to JSON data...');
+    finalResult = await applyTransformationPipeline(
+      finalResult,
+      endpoint.transform_config,
+      supabase
+    );
+  }
+  return deepCleanObject(finalResult);
 }
 async function generateAdvancedJSONResponse(endpoint, dataSources, supabase, mappingConfig) {
   console.log('Advanced JSON Mapping Config:', JSON.stringify(mappingConfig, null, 2));
@@ -964,43 +982,6 @@ function setValueAtPath(obj, path, value) {
   }
   current[parts[parts.length - 1]] = value;
 }
-// Apply transformations
-function applyTransformation(value, transform) {
-  const { type, config } = transform;
-  try {
-    switch(type){
-      case 'uppercase':
-        return String(value).toUpperCase();
-      case 'lowercase':
-        return String(value).toLowerCase();
-      case 'capitalize':
-        return String(value).charAt(0).toUpperCase() + String(value).slice(1);
-      case 'trim':
-        return String(value).trim();
-      case 'substring':
-        return String(value).substring(config.start || 0, config.end);
-      case 'replace':
-        return String(value).replace(config.find, config.replace || '');
-      case 'number_format':
-        return Number(value).toFixed(config.decimals || 2);
-      case 'date_format':
-        return formatDate(value);
-      case 'parse_json':
-        try {
-          return JSON.parse(value);
-        } catch  {
-          return value;
-        }
-      case 'stringify':
-        return JSON.stringify(value);
-      default:
-        return value;
-    }
-  } catch (error) {
-    console.error(`Transformation error (${type}):`, error);
-    return value;
-  }
-}
 // Evaluate conditional operators
 function evaluateCondition(value, operator, compareValue) {
   switch(operator){
@@ -1022,7 +1003,6 @@ function evaluateCondition(value, operator, compareValue) {
       return false;
   }
 }
-// ============= KEEP ALL YOUR EXISTING HELPER FUNCTIONS =============
 // Fetch data from a single data source
 async function fetchDataFromSource(dataSource, supabase, requestHost) {
   try {
@@ -1096,11 +1076,11 @@ async function fetchDataFromSource(dataSource, supabase, requestHost) {
         data = cleanEncodingIssues(textData);
       }
       // Navigate to data path if specified
-      if (apiConfig.data_path) {
+      /*if (apiConfig.data_path) {
         const result = getValueFromPath(data, apiConfig.data_path);
         console.log('After navigation:', result[0]?.title);
         return result;
-      }
+      }*/
       return data;
     } else if (dataSource.type === 'database') {
       // Your existing database code
@@ -1527,4 +1507,443 @@ function parseAndCleanRSS(xml) {
     });
   }
   return items;
+}
+// ===== TRANSFORMATION PIPELINE FUNCTIONS =====
+async function applyTransformationPipeline(
+  data: any,
+  transformConfig: any,
+  supabase: any
+): Promise<any> {
+  if (!transformConfig?.transformations || transformConfig.transformations.length === 0) {
+    return data;
+  }
+  
+  let result = data;
+  
+  // Process transformations in order
+  for (const transformation of transformConfig.transformations) {
+    console.log(`Applying transformation: ${transformation.type}`);
+    result = await applyTransformation(result, transformation, supabase);
+  }
+  
+  return result;
+}
+
+async function applyTransformation(
+  data: any,
+  transformation: any,
+  supabase: any
+): Promise<any> {
+  const { type, config = {} } = transformation;
+  
+  switch (type) {
+    // Array operations (work on arrays)
+    case 'filter':
+      if (!Array.isArray(data)) return data;
+      return data.filter((item: any) => {
+        const value = getValueFromPath(item, config.field);
+        return evaluateConditionSimple(value, config.operator, config.value);
+      });
+      
+    case 'sort':
+      if (!Array.isArray(data)) return data;
+      return [...data].sort((a: any, b: any) => {
+        const aVal = getValueFromPath(a, config.field);
+        const bVal = getValueFromPath(b, config.field);
+        const comparison = aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
+        return config.order === 'desc' ? -comparison : comparison;
+      });
+      
+    case 'limit':
+      if (!Array.isArray(data)) return data;
+      return data.slice(0, config.count || 10);
+      
+    case 'unique':
+      if (!Array.isArray(data)) return data;
+      if (config.field) {
+        const seen = new Set();
+        return data.filter((item: any) => {
+          const value = getValueFromPath(item, config.field);
+          if (seen.has(value)) return false;
+          seen.add(value);
+          return true;
+        });
+      }
+      return [...new Set(data)];
+      
+    case 'map':
+      if (!Array.isArray(data)) return data;
+      return data.map((item: any) => {
+        const mapped: any = {};
+        for (const [newKey, oldPath] of Object.entries(config.fields || {})) {
+          mapped[newKey] = getValueFromPath(item, oldPath as string);
+        }
+        return mapped;
+      });
+      
+    // Field operations
+    case 'add-field':
+      if (Array.isArray(data)) {
+        return data.map((item: any) => ({
+          ...item,
+          [config.field]: config.value
+        }));
+      }
+      return { ...data, [config.field]: config.value };
+      
+    case 'remove-field':
+      if (Array.isArray(data)) {
+        return data.map((item: any) => {
+          const copy = { ...item };
+          delete copy[config.field];
+          return copy;
+        });
+      }
+      const copy = { ...data };
+      delete copy[config.field];
+      return copy;
+      
+    case 'rename-field':
+      if (Array.isArray(data)) {
+        return data.map((item: any) => {
+          const copy = { ...item };
+          if (config.from in copy) {
+            copy[config.to] = copy[config.from];
+            delete copy[config.from];
+          }
+          return copy;
+        });
+      }
+      if (config.from in data) {
+        const copy = { ...data };
+        copy[config.to] = copy[config.from];
+        delete copy[config.from];
+        return copy;
+      }
+      return data;
+      
+    // String transformations
+    case 'uppercase':
+    case 'lowercase':
+    case 'capitalize':
+    case 'trim':
+      if (Array.isArray(data)) {
+        return data.map((item: any) => 
+          transformField(item, config.field, (val: any) => {
+            const str = String(val);
+            if (type === 'uppercase') return str.toUpperCase();
+            if (type === 'lowercase') return str.toLowerCase();
+            if (type === 'capitalize') return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+            if (type === 'trim') return str.trim();
+            return str;
+          })
+        );
+      }
+      return transformField(data, config.field, (val: any) => {
+        const str = String(val);
+        if (type === 'uppercase') return str.toUpperCase();
+        if (type === 'lowercase') return str.toLowerCase();
+        if (type === 'capitalize') return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+        if (type === 'trim') return str.trim();
+        return str;
+      });
+      
+    // Number operations
+    case 'round':
+    case 'floor':
+    case 'ceil':
+      if (Array.isArray(data)) {
+        return data.map((item: any) => 
+          transformField(item, config.field, (val: any) => {
+            const num = Number(val);
+            if (type === 'round') return Math.round(num);
+            if (type === 'floor') return Math.floor(num);
+            if (type === 'ceil') return Math.ceil(num);
+            return num;
+          })
+        );
+      }
+      return transformField(data, config.field, (val: any) => {
+        const num = Number(val);
+        if (type === 'round') return Math.round(num);
+        if (type === 'floor') return Math.floor(num);
+        if (type === 'ceil') return Math.ceil(num);
+        return num;
+      });
+      
+    // Aggregations
+    case 'count':
+      if (!Array.isArray(data)) return { count: 1 };
+      return { count: data.length };
+      
+    case 'sum':
+      if (!Array.isArray(data)) return data;
+      if (!fieldToTransform) {
+        console.warn('Sum transformation requires a field');
+        return data;
+      }
+      return {
+        sum: data.reduce((acc: number, item: any) => 
+          acc + Number(getValueFromPath(item, fieldToTransform) || 0), 0
+        )
+      };
+      
+    case 'average':
+      if (!Array.isArray(data)) return data;
+      if (!fieldToTransform) {
+        console.warn('Average transformation requires a field');
+        return data;
+      }
+      const sum = data.reduce((acc: number, item: any) => 
+        acc + Number(getValueFromPath(item, fieldToTransform) || 0), 0
+      );
+      return { average: data.length > 0 ? sum / data.length : 0 };
+      
+    // AI transformation
+    case 'ai-transform':
+      return await applyAITransformation(data, transformation, supabase);
+      
+    default:
+      console.warn(`Unknown transformation type: ${type}`);
+      return data;
+  }
+}
+
+// Helper function for AI transformations
+// Complete applyAITransformation function with throttling and JSON parsing
+async function applyAITransformation(
+  data: any,
+  transformation: any,
+  supabase: any
+): Promise<any> {
+  const { config = {}, source_field } = transformation;
+  
+  try {
+    // If a specific field is selected, only transform that field
+    if (source_field && Array.isArray(data)) {
+      console.log(`Applying AI transformation to field: ${source_field}`);
+      
+      // THROTTLING CONFIGURATION
+      const batchSize = config.batchSize || 5; // Process 5 items at a time
+      const delayBetweenBatches = config.batchDelay || 2000; // 2 second delay between batches
+      const maxItems = config.maxItems || 50; // Maximum items to process (safety limit)
+      
+      // Limit the number of items to process
+      const itemsToProcess = data.slice(0, Math.min(data.length, maxItems));
+      const skippedCount = data.length - itemsToProcess.length;
+      
+      if (skippedCount > 0) {
+        console.warn(`AI transformation: Processing only first ${maxItems} items, skipping ${skippedCount} items`);
+      }
+      
+      const results = [];
+      
+      // PROCESS IN BATCHES
+      for (let i = 0; i < itemsToProcess.length; i += batchSize) {
+        const batch = itemsToProcess.slice(i, i + batchSize);
+        console.log(`Processing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(itemsToProcess.length / batchSize)}`);
+        
+        // Process batch items in parallel
+        const batchResults = await Promise.all(batch.map(async (item: any) => {
+          const fieldValue = getValueFromPath(item, source_field);
+          
+          let prompt = config.prompt || 'Transform this value';
+          prompt = `Value: ${JSON.stringify(fieldValue)}\n\nTask: ${prompt}`;
+          
+          if (config.outputFormat === 'json') {
+            prompt += '\n\nRespond with valid JSON only.';
+          }
+          
+          const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+          
+          try {
+            const response = await supabase.functions.invoke('claude', {
+              body: {
+                prompt,
+                systemPrompt: config.systemPrompt || 'You are a data transformation assistant.',
+                outputFormat: config.outputFormat
+              },
+              headers: {
+                Authorization: `Bearer ${supabaseServiceKey}`
+              }
+            });
+            
+            if (response.error) {
+              console.error('AI transformation error for item:', response.error);
+              return item; // Return original item on error
+            }
+            
+            let result = response.data.response;
+            
+            // PARSING FIX: Remove markdown code blocks using regex
+            if (typeof result === 'string') {
+              console.log('Result before removing markdown:', result);
+              // Strip ```json...``` or ```...```
+              result = result.replace(/^```(?:json)?\s*\n?/i, '');
+              result = result.replace(/\n?```\s*$/i, '');
+              result = result.trim();
+              console.log('Result after removing markdown:', result);
+           
+              try {
+                const parsed = JSON.parse(result);                
+                console.log('Parsed result:', parsed);
+
+                // Extract the value from the JSON object
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                  const keys = Object.keys(parsed);
+                  
+                  // If single key, extract its value
+                  if (keys.length === 1) {
+                    result = parsed[keys[0]];
+                  } else if (parsed.summary !== undefined) {
+                    result = parsed.summary;
+                  } else if (parsed.result !== undefined) {
+                    result = parsed.result;
+                  } else if (parsed.value !== undefined) {
+                    result = parsed.value;
+                  }
+                } else {
+                  result = parsed;
+                }
+              } catch (e) {
+                console.error('Failed to parse JSON:', e);
+              }
+            }
+            
+            // Set the transformed value back to the field
+            console.log('Result:', result);
+            return setFieldValue(item, source_field, result);
+            
+          } catch (error) {
+            console.error('AI transformation failed for item:', error);
+            return item; // Return original item on error
+          }
+        }));
+        
+        results.push(...batchResults);
+        
+        // DELAY BETWEEN BATCHES (except for the last batch)
+        if (i + batchSize < itemsToProcess.length) {
+          console.log(`Waiting ${delayBetweenBatches}ms before next batch...`);
+          await new Promise(resolve => setTimeout(resolve, delayBetweenBatches));
+        }
+      }
+      
+      // Add any skipped items back unchanged
+      if (skippedCount > 0) {
+        results.push(...data.slice(maxItems));
+      }
+      
+      return results;
+    }
+    
+    // If no specific field, transform the entire dataset
+    // (This part would have similar parsing logic but for full dataset)
+    let prompt = config.prompt || 'Transform this data';
+    prompt = `Input data:\n${JSON.stringify(data, null, 2)}\n\nTask: ${prompt}`;
+    
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    
+    const response = await supabase.functions.invoke('claude', {
+      body: {
+        prompt,
+        systemPrompt: config.systemPrompt || 'You are a data transformation assistant.',
+        outputFormat: config.outputFormat
+      },
+      headers: {
+        Authorization: `Bearer ${supabaseServiceKey}`
+      }
+    });
+    
+    if (response.error) throw response.error;
+    
+    let result = response.data.response;
+    
+    // Apply same parsing fix for full dataset
+    if (typeof result === 'string') {
+      result = result.replace(/^```(?:json)?\s*\n?/i, '');
+      result = result.replace(/\n?```\s*$/i, '');
+      result = result.trim();
+    }
+    
+    if (config.outputFormat === 'json' && typeof result === 'string') {
+      try {
+        const parsed = JSON.parse(result);
+        result = parsed;
+      } catch (e) {
+        console.error('Failed to parse JSON:', e);
+      }
+    }
+    
+    return result;
+    
+  } catch (error) {
+    console.error('AI transformation failed:', error);
+    return data;
+  }
+}
+
+// Helper function to set a value at a field path
+function setFieldValue(obj: any, fieldPath: string, value: any): any {
+  if (!fieldPath) return value;
+  
+  const result = { ...obj };
+  const parts = fieldPath.split('.');
+  
+  if (parts.length === 1) {
+    result[fieldPath] = value;
+    return result;
+  }
+  
+  // Handle nested fields
+  let current = result;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i];
+    if (!(part in current) || typeof current[part] !== 'object') {
+      current[part] = {};
+    }
+    current = current[part];
+  }
+  
+  current[parts[parts.length - 1]] = value;
+  return result;
+}
+
+// Helper function to transform a specific field
+function transformField(obj: any, fieldPath: string, transformFn: (value: any) => any): any {
+  if (!fieldPath) return obj;
+  
+  const result = { ...obj };
+  const parts = fieldPath.split('.');
+  
+  if (parts.length === 1) {
+    result[fieldPath] = transformFn(result[fieldPath]);
+    return result;
+  }
+  
+  // Handle nested fields
+  let current = result;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (!(parts[i] in current)) return result;
+    current = current[parts[i]];
+  }
+  
+  current[parts[parts.length - 1]] = transformFn(current[parts[parts.length - 1]]);
+  return result;
+}
+
+// Simple condition evaluator (rename to avoid conflict with your existing evaluateCondition)
+function evaluateConditionSimple(value: any, operator: string, compareValue: any): boolean {
+  switch (operator) {
+    case 'equals': return value === compareValue;
+    case 'not_equals': return value !== compareValue;
+    case 'contains': return String(value).includes(compareValue);
+    case 'greater_than': return value > compareValue;
+    case 'less_than': return value < compareValue;
+    case 'starts_with': return String(value).startsWith(compareValue);
+    case 'ends_with': return String(value).endsWith(compareValue);
+    case 'is_empty': return !value || value === '';
+    case 'is_not_empty': return value && value !== '';
+    default: return true;
+  }
 }
