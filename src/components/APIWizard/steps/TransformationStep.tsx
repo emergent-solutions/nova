@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Card,
   Button,
@@ -9,11 +9,13 @@ import {
   Callout,
   HTMLSelect,
   FormGroup,
-  InputGroup
+  InputGroup,
+  Spinner
 } from '@blueprintjs/core';
 import { APIEndpointConfig } from '../../../types/schema.types';
 import { Transformation } from '../../../types/api.types';
 import TransformationBuilder from '../../TransformationBuilder/TransformationBuilder';
+import { useFetchProxy } from '../../../hooks/useFetchProxy';
 
 interface TransformationStepProps {
   config: APIEndpointConfig;
@@ -26,299 +28,6 @@ interface FieldInfo {
   type: string;
 }
 
-
-function getAllFields(config: APIEndpointConfig): FieldInfo[] {
-  const fields: FieldInfo[] = [];
-  const fieldPaths = new Set<string>(); // To track duplicates
-  
-  // Check if this is an RSS endpoint with source mappings
-  const isRSSEndpoint = config.outputFormat === 'rss';
-  const sourceMappings = config.outputSchema?.metadata?.sourceMappings || [];
-  
-  config.dataSources.forEach(source => {
-    let dataToAnalyze: any = null;
-    
-    // For RSS endpoints, check if we have a configured items path for this source
-    if (isRSSEndpoint && sourceMappings.length > 0) {
-      const sourceMapping = sourceMappings.find(m => m.sourceId === source.id);
-      
-      if (sourceMapping && sourceMapping.itemsPath && sourceMapping.enabled) {
-        // Navigate to the items array using the configured path
-        let sampleData = source.sample_data?.[0] || 
-                        source.api_config?.sample_response || 
-                        source.config?.api_config?.sample_response;
-        
-        if (sampleData) {
-          // Navigate to the items path
-          const items = getNestedValue(sampleData, sourceMapping.itemsPath);
-          
-          if (Array.isArray(items) && items.length > 0) {
-            // Use the first item in the array as our data to analyze
-            dataToAnalyze = items[0];
-            console.log(`Using RSS items path ${sourceMapping.itemsPath} for source ${source.name}`);
-          }
-        }
-      }
-    }
-    
-    // If not RSS or no items path found, use the regular extraction methods
-    if (!dataToAnalyze) {
-      // Method 1: Extract from sample_data if available
-      if (source.sample_data && source.sample_data.length > 0) {
-        const firstItem = source.sample_data[0];
-        
-        // Handle different data structures
-        if (typeof firstItem === 'object' && firstItem !== null) {
-          // For API sources with data_path, the sample might be nested
-          const apiConfig = source.api_config || source.config?.api_config;
-          dataToAnalyze = firstItem;
-          
-          // If there's a data_path, try to navigate to it
-          if (source.type === 'api' && apiConfig?.data_path) {
-            dataToAnalyze = getNestedValue(firstItem, apiConfig.data_path);
-            if (Array.isArray(dataToAnalyze) && dataToAnalyze.length > 0) {
-              dataToAnalyze = dataToAnalyze[0];
-            }
-          }
-        }
-      }
-      // Method 2: Check for sample response in API config
-      else if (source.api_config?.sample_response || source.config?.api_config?.sample_response) {
-        const response = source.api_config?.sample_response || source.config?.api_config?.sample_response;
-        
-        if (Array.isArray(response) && response.length > 0) {
-          dataToAnalyze = response[0];
-        } else if (typeof response === 'object' && response !== null) {
-          // Handle nested data
-          const apiConfig = source.api_config || source.config?.api_config;
-          dataToAnalyze = apiConfig?.data_path 
-            ? getNestedValue(response, apiConfig.data_path)
-            : response;
-          
-          if (Array.isArray(dataToAnalyze) && dataToAnalyze.length > 0) {
-            dataToAnalyze = dataToAnalyze[0];
-          }
-        }
-      }
-    }
-    
-    // Extract fields with nested paths using the enhanced extraction
-    if (dataToAnalyze && typeof dataToAnalyze === 'object' && !Array.isArray(dataToAnalyze)) {
-      const extractedFields = extractFieldPathsEnhanced(dataToAnalyze);
-      extractedFields.forEach(field => {
-        if (!fieldPaths.has(field.path)) {
-          fieldPaths.add(field.path);
-          fields.push(field);
-        }
-      });
-    }
-    
-    // Fallback to simple field lists if no sample data
-    else if (source.fields && source.fields.length > 0) {
-      source.fields.forEach((field: string) => {
-        // Check if it's a nested field (contains dots)
-        if (field.includes('.')) {
-          const parts = field.split('.');
-          let display = parts.join(' → ');
-          if (!fieldPaths.has(field)) {
-            fieldPaths.add(field);
-            fields.push({ 
-              path: field, 
-              display: display,
-              type: inferFieldType(field)
-            });
-          }
-        } else {
-          if (!fieldPaths.has(field)) {
-            fieldPaths.add(field);
-            fields.push({ 
-              path: field, 
-              display: field, 
-              type: inferFieldType(field)
-            });
-          }
-        }
-      });
-    }
-    else if (source.api_config?.extracted_fields) {
-      source.api_config.extracted_fields.forEach((field: string) => {
-        if (!fieldPaths.has(field)) {
-          fieldPaths.add(field);
-          const display = field.includes('.') ? field.split('.').join(' → ') : field;
-          fields.push({ 
-            path: field, 
-            display: display, 
-            type: inferFieldType(field)
-          });
-        }
-      });
-    }
-    else if (source.config?.api_config?.extracted_fields) {
-      source.config.api_config.extracted_fields.forEach((field: string) => {
-        if (!fieldPaths.has(field)) {
-          fieldPaths.add(field);
-          const display = field.includes('.') ? field.split('.').join(' → ') : field;
-          fields.push({ 
-            path: field, 
-            display: display, 
-            type: inferFieldType(field)
-          });
-        }
-      });
-    }
-  });
-  
-  // Sort fields to group by hierarchy
-  fields.sort((a, b) => {
-    // First sort by depth (root fields first)
-    const aDepth = a.path.split('.').length;
-    const bDepth = b.path.split('.').length;
-    if (aDepth !== bDepth) return aDepth - bDepth;
-    
-    // Then alphabetically
-    return a.path.localeCompare(b.path);
-  });
-  
-  return fields;
-}
-
-function extractFieldPathsEnhanced(obj: any, prefix = '', depth = 0, maxDepth = 4): FieldInfo[] {
-  const fields: FieldInfo[] = [];
-  
-  if (depth >= maxDepth || !obj || typeof obj !== 'object') return fields;
-  
-  Object.keys(obj).forEach(key => {
-    // Skip internal fields
-    if (key.startsWith('_') || key.startsWith('$')) return;
-    
-    const path = prefix ? `${prefix}.${key}` : key;
-    const value = obj[key];
-    
-    if (value === null || value === undefined) {
-      fields.push({ 
-        path, 
-        display: formatFieldDisplay(path),
-        type: 'unknown'
-      });
-    } else if (Array.isArray(value)) {
-      // Add the array field itself
-      fields.push({ 
-        path, 
-        display: formatFieldDisplay(path) + ' []',
-        type: 'array'
-      });
-      
-      // Extract fields from first array item if it's an object
-      if (value.length > 0 && typeof value[0] === 'object' && value[0] !== null) {
-        const arrayItemFields = extractFieldPathsEnhanced(value[0], `${path}[*]`, depth + 1, maxDepth);
-        fields.push(...arrayItemFields);
-      }
-    } else if (typeof value === 'object') {
-      // Add the object field itself
-      fields.push({ 
-        path, 
-        display: formatFieldDisplay(path) + ' {}',
-        type: 'object'
-      });
-      
-      // Recursively extract nested fields
-      const nestedFields = extractFieldPathsEnhanced(value, path, depth + 1, maxDepth);
-      fields.push(...nestedFields);
-    } else {
-      const fieldType = typeof value === 'boolean' ? 'boolean' : 
-                       typeof value === 'number' ? 'number' : 'string';
-      fields.push({ 
-        path, 
-        display: formatFieldDisplay(path),
-        type: fieldType
-      });
-    }
-  });
-  
-  return fields;
-}
-
-// Helper to format field display with arrows for nested paths
-function formatFieldDisplay(path: string): string {
-  // Handle array notation
-  if (path.includes('[*]')) {
-    const parts = path.split('[*]');
-    const basePath = parts[0].split('.').join(' → ');
-    const remainingPath = parts[1] ? parts[1].substring(1).split('.').join(' → ') : '';
-    return remainingPath ? `${basePath}[] → ${remainingPath}` : `${basePath}[]`;
-  }
-  
-  // Regular nested path
-  return path.split('.').join(' → ');
-}
-
-// Helper function to get nested value from object using path
-function getNestedValue(obj: any, path: string): any {
-  const parts = path.split('.');
-  let current = obj;
-  
-  for (const part of parts) {
-    if (current && typeof current === 'object' && part in current) {
-      current = current[part];
-    } else {
-      return null;
-    }
-  }
-  
-  return current;
-}
-
-function inferFieldType(fieldPath: string): string {
-  // Simple type inference based on field name/path
-  if (!fieldPath) return 'string';
-  
-  // Extract the last part of the path for analysis
-  const fieldName = fieldPath.split('.').pop() || fieldPath;
-  const lower = fieldName.toLowerCase();
-  
-  // Check for array notation
-  if (fieldPath.includes('[*]')) {
-    return 'array';
-  }
-  
-  // Common date/time fields
-  if (lower.includes('date') || lower.includes('time') || 
-      lower.includes('created') || lower.includes('updated') ||
-      lower.includes('timestamp')) {
-    return 'date';
-  }
-  
-  // Numeric fields
-  if (lower.includes('count') || lower.includes('amount') || 
-      lower.includes('price') || lower.includes('quantity') ||
-      lower.includes('total') || lower.includes('sum') ||
-      lower.includes('id') || lower.endsWith('_id')) {
-    return 'number';
-  }
-  
-  // Boolean fields
-  if (lower.startsWith('is_') || lower.startsWith('has_') || 
-      lower.includes('enabled') || lower.includes('active') ||
-      lower.includes('visible') || lower.includes('completed')) {
-    return 'boolean';
-  }
-  
-  // Array fields
-  if (lower.includes('items') || lower.includes('tags') || 
-      lower.includes('categories') || lower.includes('list')) {
-    return 'array';
-  }
-  
-  // URL fields
-  if (lower.includes('url') || lower.includes('link') || 
-      lower.includes('href') || lower.includes('uri')) {
-    return 'string';
-  }
-  
-  // Default to string
-  return 'string';
-}
-
 const TransformationStep: React.FC<TransformationStepProps> = ({ config, onUpdate }) => {
   const [transformations, setTransformations] = useState<Transformation[]>(
     config.transformations || []
@@ -326,6 +35,188 @@ const TransformationStep: React.FC<TransformationStepProps> = ({ config, onUpdat
   const [selectedTransform, setSelectedTransform] = useState<string | null>(null);
   const [editingTransform, setEditingTransform] = useState<Transformation | null>(null);
   const [newFieldName, setNewFieldName] = useState<string>('');
+  const [availableFields, setAvailableFields] = useState<FieldInfo[]>([]);
+  const [isLoadingFields, setIsLoadingFields] = useState(false);
+  
+  const { fetchViaProxy } = useFetchProxy();
+
+  // Function to extract fields from data
+  const extractFieldsFromData = (data: any, itemsPath?: string): string[] => {
+    const fields: string[] = [];
+    let dataToAnalyze = data;
+    
+    // If there's an items path (for RSS), navigate to it
+    if (itemsPath && data[itemsPath]) {
+      const items = data[itemsPath];
+      if (Array.isArray(items) && items.length > 0) {
+        dataToAnalyze = items[0];
+      }
+    }
+    
+    // Extract fields from the data
+    if (dataToAnalyze && typeof dataToAnalyze === 'object' && !Array.isArray(dataToAnalyze)) {
+      const extractFields = (obj: any, prefix = ''): void => {
+        Object.keys(obj).forEach(key => {
+          if (key.startsWith('_') || key.startsWith('$')) return;
+          
+          const path = prefix ? `${prefix}.${key}` : key;
+          const value = obj[key];
+          
+          fields.push(path);
+          
+          // Recursively extract nested fields (but not arrays)
+          if (value && typeof value === 'object' && !Array.isArray(value)) {
+            extractFields(value, path);
+          }
+        });
+      };
+      
+      extractFields(dataToAnalyze);
+    }
+    
+    return fields;
+  };
+
+  // Fetch fields when component mounts or config changes
+  useEffect(() => {
+    const fetchFields = async () => {
+      setIsLoadingFields(true);
+      const allFields: FieldInfo[] = [];
+      const fieldPaths = new Set<string>();
+      
+      // Check if this is an RSS endpoint
+      const isRSSEndpoint = config.outputFormat === 'rss';
+      const sourceMappings = config.outputSchema?.metadata?.sourceMappings || [];
+      
+      console.log('TransformationStep - Fetching fields:', {
+        isRSSEndpoint,
+        sourceMappings,
+        dataSources: config.dataSources.length
+      });
+      
+      // Process each data source
+      for (const source of config.dataSources) {
+        try {
+          // Check if we already have fields stored
+          if (source.fields && source.fields.length > 0) {
+            console.log(`Using stored fields for ${source.name}:`, source.fields);
+            source.fields.forEach((field: string) => {
+              if (!fieldPaths.has(field)) {
+                fieldPaths.add(field);
+                allFields.push({
+                  path: field,
+                  display: field.includes('.') ? field.split('.').join(' → ') : field,
+                  type: inferFieldType(field)
+                });
+              }
+            });
+            continue;
+          }
+          
+          // For API sources, fetch the data
+          if (source.type === 'api') {
+            const apiConfig = source.api_config || source.config?.api_config;
+            
+            if (apiConfig?.url) {
+              console.log(`Fetching data for ${source.name} from ${apiConfig.url}`);
+              
+              try {
+                const result = await fetchViaProxy(apiConfig.url, {
+                  method: apiConfig.method || 'GET',
+                  headers: apiConfig.headers || {}
+                });
+                
+                if (result.status < 400 && result.data) {
+                  let extractedFields: string[] = [];
+                  
+                  // Determine the effective data path
+                  let effectiveDataPath = apiConfig.data_path;
+                  
+                  // For RSS endpoints, use the itemsPath from source mappings if data_path is not set
+                  if (isRSSEndpoint && !effectiveDataPath) {
+                    const sourceMapping = sourceMappings.find((m: any) => m.sourceId === source.id);
+                    if (sourceMapping?.itemsPath && sourceMapping.enabled) {
+                      effectiveDataPath = sourceMapping.itemsPath;
+                      console.log(`Using RSS itemsPath as data path: ${effectiveDataPath}`);
+                    }
+                  }
+                  
+                  // Extract fields based on the effective data path
+                  if (effectiveDataPath) {
+                    console.log(`Extracting fields from path: ${effectiveDataPath}`);
+                    
+                    // Navigate to the specified path
+                    const pathParts = effectiveDataPath.split('.');
+                    let current = result.data;
+                    
+                    for (const part of pathParts) {
+                      if (current && typeof current === 'object') {
+                        current = current[part];
+                      }
+                    }
+                    
+                    // If we found an array at the path, extract from first item
+                    if (Array.isArray(current) && current.length > 0) {
+                      console.log(`Found array at path with ${current.length} items`);
+                      extractedFields = extractFieldsFromData(current[0]);
+                    } else if (current) {
+                      extractedFields = extractFieldsFromData(current);
+                    } else {
+                      console.warn(`No data found at path: ${effectiveDataPath}`);
+                      extractedFields = extractFieldsFromData(result.data);
+                    }
+                  } else {
+                    // No path specified, extract from root
+                    extractedFields = extractFieldsFromData(result.data);
+                  }
+                  
+                  console.log(`Extracted ${extractedFields.length} fields for ${source.name}`);
+                  
+                  // Add extracted fields to our collection
+                  extractedFields.forEach(field => {
+                    if (!fieldPaths.has(field)) {
+                      fieldPaths.add(field);
+                      allFields.push({
+                        path: field,
+                        display: field.includes('.') ? field.split('.').join(' → ') : field,
+                        type: inferFieldType(field)
+                      });
+                    }
+                  });
+                  
+                  // Update the source with extracted fields for future use
+                  const updatedSources = config.dataSources.map(ds => 
+                    ds.id === source.id 
+                      ? { ...ds, fields: extractedFields }
+                      : ds
+                  );
+                  onUpdate({ dataSources: updatedSources });
+                }
+              } catch (fetchError) {
+                console.error(`Failed to fetch data for ${source.name}:`, fetchError);
+              }
+            }
+          }
+        } catch (error) {
+          console.error(`Error processing source ${source.name}:`, error);
+        }
+      }
+      
+      // Sort fields by hierarchy
+      allFields.sort((a, b) => {
+        const aDepth = a.path.split('.').length;
+        const bDepth = b.path.split('.').length;
+        if (aDepth !== bDepth) return aDepth - bDepth;
+        return a.path.localeCompare(b.path);
+      });
+      
+      console.log(`Total fields available: ${allFields.length}`);
+      setAvailableFields(allFields);
+      setIsLoadingFields(false);
+    };
+    
+    fetchFields();
+  }, [config.dataSources, config.outputFormat, config.outputSchema]);
 
   const addTransformation = () => {
     const newTransform: Transformation = {
@@ -378,7 +269,16 @@ const TransformationStep: React.FC<TransformationStepProps> = ({ config, onUpdat
     return iconMap[type] || 'exchange';
   };
 
-  const availableFields = getAllFields(config);
+  if (isLoadingFields) {
+    return (
+      <div className="transformation-step">
+        <Card style={{ padding: '40px', textAlign: 'center' }}>
+          <Spinner />
+          <p style={{ marginTop: '20px' }}>Loading available fields...</p>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="transformation-step">
@@ -627,5 +527,56 @@ const TransformationStep: React.FC<TransformationStepProps> = ({ config, onUpdat
     </div>
   );
 };
+
+function inferFieldType(fieldPath: string): string {
+  // Simple type inference based on field name/path
+  if (!fieldPath) return 'string';
+  
+  // Extract the last part of the path for analysis
+  const fieldName = fieldPath.split('.').pop() || fieldPath;
+  const lower = fieldName.toLowerCase();
+  
+  // Check for array notation
+  if (fieldPath.includes('[*]')) {
+    return 'array';
+  }
+  
+  // Common date/time fields
+  if (lower.includes('date') || lower.includes('time') || 
+      lower.includes('created') || lower.includes('updated') ||
+      lower.includes('timestamp')) {
+    return 'date';
+  }
+  
+  // Numeric fields
+  if (lower.includes('count') || lower.includes('amount') || 
+      lower.includes('price') || lower.includes('quantity') ||
+      lower.includes('total') || lower.includes('sum') ||
+      lower.includes('id') || lower.endsWith('_id')) {
+    return 'number';
+  }
+  
+  // Boolean fields
+  if (lower.startsWith('is_') || lower.startsWith('has_') || 
+      lower.includes('enabled') || lower.includes('active') ||
+      lower.includes('visible') || lower.includes('completed')) {
+    return 'boolean';
+  }
+  
+  // Array fields
+  if (lower.includes('items') || lower.includes('tags') || 
+      lower.includes('categories') || lower.includes('list')) {
+    return 'array';
+  }
+  
+  // URL fields
+  if (lower.includes('url') || lower.includes('link') || 
+      lower.includes('href') || lower.includes('uri')) {
+    return 'string';
+  }
+  
+  // Default to string
+  return 'string';
+}
 
 export default TransformationStep;
