@@ -497,7 +497,6 @@ async function generateRSSFeed(endpoint, dataSources, supabase) {
 }
 // Generate JSON response
 async function generateJSONResponse(endpoint, dataSources, supabase) {
-  let finalResult = {};
   // Handle different possible schema config structures
   const schemaConfig = endpoint.schema_config || {};
   const metadata = schemaConfig.schema?.metadata || schemaConfig.metadata || {};
@@ -512,18 +511,24 @@ async function generateJSONResponse(endpoint, dataSources, supabase) {
   // Use advanced mapping if jsonMappingConfig exists and has field mappings
   if (jsonMappingConfig && jsonMappingConfig.fieldMappings && jsonMappingConfig.fieldMappings.length > 0) {
     console.log('Using advanced JSON field mapping (detected from jsonMappingConfig presence)');
-    const result = await generateAdvancedJSONResponse(endpoint, dataSources, supabase, jsonMappingConfig);
-    finalResult = deepCleanObject(result);
-  }
-  // Check for explicit jsonConfigMode as fallback
-  if (jsonMappingConfig?.fieldMappings?.length > 0) {
-    console.log('Using advanced JSON field mapping (detected from jsonConfigMode)');
-    const result = await generateAdvancedJSONResponse(endpoint, dataSources, supabase, jsonMappingConfig);
-    finalResult = deepCleanObject(result);
+    let result = await generateAdvancedJSONResponse(endpoint, dataSources, supabase, jsonMappingConfig);
+    result = deepCleanObject(result);
+
+    // Apply transformations if configured
+    if (endpoint.transform_config?.transformations) {
+      console.log('Applying transformations to JSON data...');
+      result = await applyTransformationPipeline(
+        result,
+        endpoint.transform_config,
+        supabase
+      );
+    }
+
+    return deepCleanObject(result);
   }
   // Original JSON generation logic (backward compatibility)
   console.log('Using standard JSON generation');
-  const results = {};
+  let results = {};
   // Check for concatenations/relationships
   const concatenations = endpoint.concatenations || [];
   const relationships = endpoint.relationships || [];
@@ -575,19 +580,19 @@ async function generateJSONResponse(endpoint, dataSources, supabase) {
       };
     }
     wrapped[metadata.rootWrapper] = results;
-    finalResult = deepCleanObject(wrapped);
+    results = deepCleanObject(wrapped);
   }
-  finalResult = deepCleanObject(results);
+  results = deepCleanObject(results);
 
   if (endpoint.transform_config?.transformations) {
     console.log('Applying transformations to JSON data...');
-    finalResult = await applyTransformationPipeline(
-      finalResult,
+    results = await applyTransformationPipeline(
+      results,
       endpoint.transform_config,
       supabase
     );
   }
-  return deepCleanObject(finalResult);
+  return deepCleanObject(results);
 }
 async function generateAdvancedJSONResponse(endpoint, dataSources, supabase, mappingConfig) {
   console.log('Advanced JSON Mapping Config:', JSON.stringify(mappingConfig, null, 2));
