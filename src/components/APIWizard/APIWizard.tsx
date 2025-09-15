@@ -1,4 +1,3 @@
-// src/components/APIWizard/APIWizard.tsx
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   DialogStep,
@@ -161,7 +160,12 @@ export const APIWizard: React.FC<APIWizardProps> = ({
   const [isSavingDataSources, setIsSavingDataSources] = useState(false);
   const [pendingStepChange, setPendingStepChange] = useState<string | null>(null);
   const [autoDraftId, setAutoDraftId] = useState<string | null>(null);
-
+  const [sampleData, setSampleData] = useState<Record<string, any>>(() => {
+    if (mode === 'edit' && existingEndpoint?.sample_data) {
+      return existingEndpoint.sample_data;
+    }
+    return {};
+  });
 
   // Force navigation to deployment step when in edit mode after dialog opens
   useEffect(() => {
@@ -340,16 +344,6 @@ export const APIWizard: React.FC<APIWizardProps> = ({
     return selectedDataSources.length > 0 || newDataSources.some(ds => ds.name && ds.type);
   };
 
-  const sampleData = useMemo(() => {
-    const result = {};
-    allDataSources.forEach(source => {
-      if (source.api_config?.sample_response) {
-        result[source.id] = source.api_config.sample_response;
-      }
-    });
-    return result;
-  }, [allDataSources]);
-
   const handleAutoDraftCreated = (draftId: string | null) => {
     setAutoDraftId(draftId);
   };  
@@ -410,6 +404,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
           auth_config: config.authentication,
           cache_config: config.caching,
           rate_limit_config: config.rateLimiting,
+          sample_data: sampleData,
           active: true,
           is_draft: false, // Convert draft to final if it was an auto-draft
           updated_at: new Date().toISOString()
@@ -605,8 +600,9 @@ export const APIWizard: React.FC<APIWizardProps> = ({
             auth_config: config.authentication,
             cache_config: config.caching,
             rate_limit_config: config.rateLimiting,
+            sample_data: sampleData,
             active: true,
-            is_draft: false, // Explicitly not a draft
+            is_draft: false,
             user_id: user.id
           })
           .select()
@@ -872,6 +868,8 @@ export const APIWizard: React.FC<APIWizardProps> = ({
               dataSources: allDataSources
             }}
             onUpdate={updateConfig}
+            initialSampleData={sampleData}
+            onSampleDataChange={setSampleData}
           />
         }
       />
@@ -883,6 +881,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
           <TransformationStep
             config={config}
             onUpdate={updateConfig}
+            sampleData={sampleData}
           />
         }
       />

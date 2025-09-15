@@ -60,16 +60,6 @@ function extractFieldPaths(obj: any, prefix = ''): Array<{ path: string; display
   return fields;
 }
 
-const getDefaultChannelLink = () => {
-  // Option 1: Use current application URL
-  if (typeof window !== 'undefined') {
-    return window.location.origin;
-  }
-  
-  // Option 2: Use a configured base URL
-  return import.meta.env.VITE_APP_URL || 'https://your-app.com';
-};
-
 const AppToaster = Toaster.create({
   position: Position.TOP,
 });
@@ -92,6 +82,8 @@ interface RSSSourceMapping {
 interface OutputFormatStepProps {
   config: APIEndpointConfig;
   onUpdate: (updates: Partial<APIEndpointConfig>) => void;
+  initialSampleData?: Record<string, any>;
+  onSampleDataChange?: (data: Record<string, any>) => void;
 }
 
 const JsonPathSelector: React.FC<{
@@ -709,8 +701,7 @@ ${allItems.map((item, idx) => `
   );
 };
 
-const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate }) => {
-  const [loadingFields, setLoadingFields] = useState<string[]>([]);
+const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate, initialSampleData, onSampleDataChange }) => {
   const [testingSource, setTestingSource] = useState<string | null>(null);
   const [discoveredFields, setDiscoveredFields] = useState<Record<string, string[]>>({});
   const [format, setFormat] = useState(config.outputFormat || 'json');
@@ -754,7 +745,6 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
     };
   });
   const [selectedDataSource, setSelectedDataSource] = useState<string>('');
-  const [sampleData, setSampleData] = useState<Record<string, any>>({});
   const [jsonConfigMode, setJsonConfigMode] = useState<'simple' | 'advanced' | 'openapi'>(() => {
     // If we have saved field mappings or jsonMappingConfig, use advanced mode
     if (config.fieldMappings?.length > 0 || config.outputSchema?.metadata?.jsonMappingConfig) {
@@ -786,11 +776,21 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
     }
     
     return savedMappings;
-  });
+  });  
+  const [sampleData, setSampleData] = useState<Record<string, any>>(
+    initialSampleData || {}
+  );
 
   const isInitialMount = useRef(true);
   
   const { fetchViaProxy } = useFetchProxy();
+
+  // Update parent whenever local sampleData changes
+  useEffect(() => {
+    if (onSampleDataChange) {
+      onSampleDataChange(sampleData);
+    }
+  }, [sampleData, onSampleDataChange]);
 
   useEffect(() => {
     // Update the parent config with all our format options
@@ -1004,135 +1004,97 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate })
     }
   };
 
+  // Function to test all data sources at once
+  const testAllDataSources = async () => {
+    const sourcesToTest = config.dataSources.filter(source => {
+      const sourceFields = source.fields || discoveredFields[source.id] || [];
+      return sourceFields.length > 0; // Only re-test sources that already have fields
+    });
 
-    // Function to test all data sources at once
-    const testAllDataSources = async () => {
-      const sourcesToTest = config.dataSources.filter(source => {
-        const sourceFields = source.fields || discoveredFields[source.id] || [];
-        return sourceFields.length > 0; // Only re-test sources that already have fields
+    if (sourcesToTest.length === 0) {
+      AppToaster.show({
+        message: 'No data sources with fields to re-test',
+        intent: 'warning'
       });
-  
-      if (sourcesToTest.length === 0) {
-        AppToaster.show({
-          message: 'No data sources with fields to re-test',
-          intent: 'warning'
-        });
-        return;
-      }
-  
-      setTestingSource('all'); // Special state to indicate all sources are being tested
-      
-      let successCount = 0;
-      let failCount = 0;
-  
-      for (const source of sourcesToTest) {
-        try {
-          await testAndDiscoverFields(source);
-          successCount++;
-        } catch (error) {
-          failCount++;
-          console.error(`Failed to test ${source.name}:`, error);
-        }
-      }
-  
-      setTestingSource(null);
-  
-      // Show summary toast
-      if (failCount === 0) {
-        AppToaster.show({
-          message: `Successfully re-tested all ${successCount} data sources`,
-          intent: 'success'
-        });
-      } else {
-        AppToaster.show({
-          message: `Re-tested ${successCount} sources, ${failCount} failed`,
-          intent: failCount > 0 ? 'warning' : 'success'
-        });
-      }
-    };
-  
-    // Function to discover fields for all data sources at once
-    const discoverAllFields = async () => {
-      const sourcesToDiscover = config.dataSources.filter(source => {
-        const sourceFields = source.fields || discoveredFields[source.id] || [];
-        return sourceFields.length === 0; // Only discover for sources without fields
-      });
-  
-      if (sourcesToDiscover.length === 0) {
-        AppToaster.show({
-          message: 'All data sources already have fields discovered',
-          intent: 'primary'
-        });
-        return;
-      }
-  
-      setTestingSource('all'); // Special state to indicate all sources are being tested
-      
-      let successCount = 0;
-      let failCount = 0;
-  
-      for (const source of sourcesToDiscover) {
-        try {
-          await testAndDiscoverFields(source);
-          successCount++;
-        } catch (error) {
-          failCount++;
-          console.error(`Failed to discover fields for ${source.name}:`, error);
-        }
-      }
-  
-      setTestingSource(null);
-  
-      // Show summary toast
-      if (failCount === 0) {
-        AppToaster.show({
-          message: `Successfully discovered fields for all ${successCount} data sources`,
-          intent: 'success'
-        });
-      } else {
-        AppToaster.show({
-          message: `Discovered fields for ${successCount} sources, ${failCount} failed`,
-          intent: failCount > 0 ? 'warning' : 'success'
-        });
-      }
-    };
-  
+      return;
+    }
 
-  const fetchFieldsForSource = async (sourceId: string) => {
-    setLoadingFields([...loadingFields, sourceId]);
+    setTestingSource('all'); // Special state to indicate all sources are being tested
     
-    try {
-      // Call your API to analyze the data source
-      const response = await fetch(`/api/data-sources/${sourceId}/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      
-      if (response.ok) {
-        const { fields } = await response.json();
-        
-        // Update the data source with discovered fields
-        const updatedSources = config.dataSources.map(source => 
-          source.id === sourceId 
-            ? { ...source, fields } 
-            : source
-        );
-        
-        onUpdate({ dataSources: updatedSources });
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const source of sourcesToTest) {
+      try {
+        await testAndDiscoverFields(source);
+        successCount++;
+      } catch (error) {
+        failCount++;
+        console.error(`Failed to test ${source.name}:`, error);
       }
-    } catch (error) {
-      console.error('Failed to fetch fields:', error);
-    } finally {
-      setLoadingFields(loadingFields.filter(id => id !== sourceId));
+    }
+
+    setTestingSource(null);
+
+    // Show summary toast
+    if (failCount === 0) {
+      AppToaster.show({
+        message: `Successfully re-tested all ${successCount} data sources`,
+        intent: 'success'
+      });
+    } else {
+      AppToaster.show({
+        message: `Re-tested ${successCount} sources, ${failCount} failed`,
+        intent: failCount > 0 ? 'warning' : 'success'
+      });
     }
   };
 
-  const handleMappingsUpdate = (newMappings: any[]) => {
-    setEnhancedMappings(newMappings);
-    onUpdate({
-      fieldMappings: newMappings
+  // Function to discover fields for all data sources at once
+  const discoverAllFields = async () => {
+    const sourcesToDiscover = config.dataSources.filter(source => {
+      const sourceFields = source.fields || discoveredFields[source.id] || [];
+      return sourceFields.length === 0; // Only discover for sources without fields
     });
-  };
+
+    if (sourcesToDiscover.length === 0) {
+      AppToaster.show({
+        message: 'All data sources already have fields discovered',
+        intent: 'primary'
+      });
+      return;
+    }
+
+    setTestingSource('all'); // Special state to indicate all sources are being tested
+    
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const source of sourcesToDiscover) {
+      try {
+        await testAndDiscoverFields(source);
+        successCount++;
+      } catch (error) {
+        failCount++;
+        console.error(`Failed to discover fields for ${source.name}:`, error);
+      }
+    }
+
+    setTestingSource(null);
+
+    // Show summary toast
+    if (failCount === 0) {
+      AppToaster.show({
+        message: `Successfully discovered fields for all ${successCount} data sources`,
+        intent: 'success'
+      });
+    } else {
+      AppToaster.show({
+        message: `Discovered fields for ${successCount} sources, ${failCount} failed`,
+        intent: failCount > 0 ? 'warning' : 'success'
+      });
+    }
+  };  
 
   const handleFormatChange = (newFormat: typeof format) => {
     setFormat(newFormat);

@@ -1,0 +1,2 @@
+ALTER TABLE api_endpoints 
+ADD COLUMN sample_data JSONB DEFAULT NULL;

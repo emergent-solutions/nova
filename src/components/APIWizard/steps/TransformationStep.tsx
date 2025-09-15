@@ -15,11 +15,11 @@ import {
 import { APIEndpointConfig } from '../../../types/schema.types';
 import { Transformation } from '../../../types/api.types';
 import TransformationBuilder from '../../TransformationBuilder/TransformationBuilder';
-import { useFetchProxy } from '../../../hooks/useFetchProxy';
 
 interface TransformationStepProps {
   config: APIEndpointConfig;
   onUpdate: (updates: Partial<APIEndpointConfig>) => void;
+  sampleData?: Record<string, any>;  // Optional prop
 }
 
 interface FieldInfo {
@@ -28,7 +28,7 @@ interface FieldInfo {
   type: string;
 }
 
-const TransformationStep: React.FC<TransformationStepProps> = ({ config, onUpdate }) => {
+const TransformationStep: React.FC<TransformationStepProps> = ({ config, onUpdate, sampleData = {} }) => {
   const [transformations, setTransformations] = useState<Transformation[]>(
     config.transformations || []
   );
@@ -37,68 +37,131 @@ const TransformationStep: React.FC<TransformationStepProps> = ({ config, onUpdat
   const [newFieldName, setNewFieldName] = useState<string>('');
   const [availableFields, setAvailableFields] = useState<FieldInfo[]>([]);
   const [isLoadingFields, setIsLoadingFields] = useState(false);
-  
-  const { fetchViaProxy } = useFetchProxy();
 
   // Function to extract fields from data
-  const extractFieldsFromData = (data: any, itemsPath?: string): string[] => {
+  const extractFieldsFromData = (data: any, prefix = ''): string[] => {
     const fields: string[] = [];
-    let dataToAnalyze = data;
     
-    // If there's an items path (for RSS), navigate to it
-    if (itemsPath && data[itemsPath]) {
-      const items = data[itemsPath];
-      if (Array.isArray(items) && items.length > 0) {
-        dataToAnalyze = items[0];
+    if (!data || typeof data !== 'object') {
+      return fields;
+    }
+    
+    // If it's an array, analyze the first element
+    if (Array.isArray(data)) {
+      if (data.length > 0 && typeof data[0] === 'object') {
+        return extractFieldsFromData(data[0], prefix);
       }
+      return fields;
     }
     
-    // Extract fields from the data
-    if (dataToAnalyze && typeof dataToAnalyze === 'object' && !Array.isArray(dataToAnalyze)) {
-      const extractFields = (obj: any, prefix = ''): void => {
-        Object.keys(obj).forEach(key => {
-          if (key.startsWith('_') || key.startsWith('$')) return;
-          
-          const path = prefix ? `${prefix}.${key}` : key;
-          const value = obj[key];
-          
-          fields.push(path);
-          
-          // Recursively extract nested fields (but not arrays)
-          if (value && typeof value === 'object' && !Array.isArray(value)) {
-            extractFields(value, path);
-          }
-        });
-      };
+    // Extract fields from object
+    Object.keys(data).forEach(key => {
+      // Skip internal/system fields
+      if (key.startsWith('_') || key.startsWith('$')) return;
       
-      extractFields(dataToAnalyze);
-    }
+      const fieldPath = prefix ? `${prefix}.${key}` : key;
+      const value = data[key];
+      
+      // Add the field
+      fields.push(fieldPath);
+      
+      // Recursively extract nested object fields (but not arrays)
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const nestedFields = extractFieldsFromData(value, fieldPath);
+        fields.push(...nestedFields);
+      }
+      // For arrays, just note it's an array field but don't traverse
+      else if (Array.isArray(value)) {
+        // Optionally add array notation
+        if (value.length > 0 && typeof value[0] === 'object') {
+          const arrayItemFields = extractFieldsFromData(value[0], `${fieldPath}[*]`);
+          fields.push(...arrayItemFields);
+        }
+      }
+    });
     
     return fields;
   };
 
-  // Fetch fields when component mounts or config changes
   useEffect(() => {
-    const fetchFields = async () => {
+    const extractFields = () => {
       setIsLoadingFields(true);
       const allFields: FieldInfo[] = [];
       const fieldPaths = new Set<string>();
       
-      // Check if this is an RSS endpoint
       const isRSSEndpoint = config.outputFormat === 'rss';
       const sourceMappings = config.outputSchema?.metadata?.sourceMappings || [];
       
-      console.log('TransformationStep - Fetching fields:', {
+      console.log('TransformationStep - Processing fields:', {
         isRSSEndpoint,
         sourceMappings,
-        dataSources: config.dataSources.length
+        dataSources: config.dataSources.length,
+        hasSampleData: Object.keys(sampleData).length > 0
       });
       
       // Process each data source
       for (const source of config.dataSources) {
         try {
-          // Check if we already have fields stored
-          if (source.fields && source.fields.length > 0) {
+          // Use passed sampleData
+          if (sampleData[source.id]) {
+            console.log(`Using sample data for ${source.name}`);
+            
+            let dataToAnalyze = sampleData[source.id];
+            
+            // Handle nested data paths for APIs
+            if (source.type === 'api' && source.api_config?.data_path) {
+              const pathParts = source.api_config.data_path.split('.');
+              let current = dataToAnalyze;
+              
+              for (const part of pathParts) {
+                if (current && typeof current === 'object') {
+                  current = current[part];
+                }
+              }
+              
+              if (Array.isArray(current) && current.length > 0) {
+                dataToAnalyze = current[0];
+              } else if (current) {
+                dataToAnalyze = current;
+              }
+            }
+            
+            // Handle RSS source mappings
+            if (isRSSEndpoint) {
+              const mapping = sourceMappings.find(m => m.sourceId === source.id);
+              if (mapping?.itemsPath) {
+                const pathParts = mapping.itemsPath.split('.');
+                let current = dataToAnalyze;
+                
+                for (const part of pathParts) {
+                  if (current && typeof current === 'object') {
+                    current = current[part];
+                  }
+                }
+                
+                if (Array.isArray(current) && current.length > 0) {
+                  dataToAnalyze = current[0];
+                } else if (current) {
+                  dataToAnalyze = current;
+                }
+              }
+            }
+            
+            // Extract fields
+            const extractedFields = extractFieldsFromData(dataToAnalyze);
+            extractedFields.forEach(field => {
+              if (!fieldPaths.has(field)) {
+                fieldPaths.add(field);
+                allFields.push({
+                  path: field,
+                  display: field.includes('.') ? field.split('.').join(' → ') : field,
+                  type: inferFieldType(field)
+                });
+              }
+            });
+          }
+          // Fallback to stored fields
+          else if (source.fields && source.fields.length > 0) {
             console.log(`Using stored fields for ${source.name}:`, source.fields);
             source.fields.forEach((field: string) => {
               if (!fieldPaths.has(field)) {
@@ -110,99 +173,16 @@ const TransformationStep: React.FC<TransformationStepProps> = ({ config, onUpdat
                 });
               }
             });
-            continue;
           }
-          
-          // For API sources, fetch the data
-          if (source.type === 'api') {
-            const apiConfig = source.api_config || source.config?.api_config;
-            
-            if (apiConfig?.url) {
-              console.log(`Fetching data for ${source.name} from ${apiConfig.url}`);
-              
-              try {
-                const result = await fetchViaProxy(apiConfig.url, {
-                  method: apiConfig.method || 'GET',
-                  headers: apiConfig.headers || {}
-                });
-                
-                if (result.status < 400 && result.data) {
-                  let extractedFields: string[] = [];
-                  
-                  // Determine the effective data path
-                  let effectiveDataPath = apiConfig.data_path;
-                  
-                  // For RSS endpoints, use the itemsPath from source mappings if data_path is not set
-                  if (isRSSEndpoint && !effectiveDataPath) {
-                    const sourceMapping = sourceMappings.find((m: any) => m.sourceId === source.id);
-                    if (sourceMapping?.itemsPath && sourceMapping.enabled) {
-                      effectiveDataPath = sourceMapping.itemsPath;
-                      console.log(`Using RSS itemsPath as data path: ${effectiveDataPath}`);
-                    }
-                  }
-                  
-                  // Extract fields based on the effective data path
-                  if (effectiveDataPath) {
-                    console.log(`Extracting fields from path: ${effectiveDataPath}`);
-                    
-                    // Navigate to the specified path
-                    const pathParts = effectiveDataPath.split('.');
-                    let current = result.data;
-                    
-                    for (const part of pathParts) {
-                      if (current && typeof current === 'object') {
-                        current = current[part];
-                      }
-                    }
-                    
-                    // If we found an array at the path, extract from first item
-                    if (Array.isArray(current) && current.length > 0) {
-                      console.log(`Found array at path with ${current.length} items`);
-                      extractedFields = extractFieldsFromData(current[0]);
-                    } else if (current) {
-                      extractedFields = extractFieldsFromData(current);
-                    } else {
-                      console.warn(`No data found at path: ${effectiveDataPath}`);
-                      extractedFields = extractFieldsFromData(result.data);
-                    }
-                  } else {
-                    // No path specified, extract from root
-                    extractedFields = extractFieldsFromData(result.data);
-                  }
-                  
-                  console.log(`Extracted ${extractedFields.length} fields for ${source.name}`);
-                  
-                  // Add extracted fields to our collection
-                  extractedFields.forEach(field => {
-                    if (!fieldPaths.has(field)) {
-                      fieldPaths.add(field);
-                      allFields.push({
-                        path: field,
-                        display: field.includes('.') ? field.split('.').join(' → ') : field,
-                        type: inferFieldType(field)
-                      });
-                    }
-                  });
-                  
-                  // Update the source with extracted fields for future use
-                  const updatedSources = config.dataSources.map(ds => 
-                    ds.id === source.id 
-                      ? { ...ds, fields: extractedFields }
-                      : ds
-                  );
-                  onUpdate({ dataSources: updatedSources });
-                }
-              } catch (fetchError) {
-                console.error(`Failed to fetch data for ${source.name}:`, fetchError);
-              }
-            }
+          else {
+            console.log(`No sample data for ${source.name}. Test in Output Format step first.`);
           }
         } catch (error) {
           console.error(`Error processing source ${source.name}:`, error);
         }
       }
       
-      // Sort fields by hierarchy
+      // Sort fields
       allFields.sort((a, b) => {
         const aDepth = a.path.split('.').length;
         const bDepth = b.path.split('.').length;
@@ -210,14 +190,19 @@ const TransformationStep: React.FC<TransformationStepProps> = ({ config, onUpdat
         return a.path.localeCompare(b.path);
       });
       
-      console.log(`Total fields available: ${allFields.length}`);
       setAvailableFields(allFields);
       setIsLoadingFields(false);
     };
     
-    fetchFields();
-  }, [config.dataSources, config.outputFormat, config.outputSchema]);
-
+    // Only extract fields if we have data sources
+    if (config.dataSources?.length > 0) {
+      extractFields();
+    } else {
+      setAvailableFields([]);
+      setIsLoadingFields(false);
+    }
+  }, [sampleData, config.dataSources, config.outputFormat, config.outputSchema]);
+ 
   const addTransformation = () => {
     const newTransform: Transformation = {
       id: `transform_${Date.now()}`,
@@ -276,6 +261,21 @@ const TransformationStep: React.FC<TransformationStepProps> = ({ config, onUpdat
           <Spinner />
           <p style={{ marginTop: '20px' }}>Loading available fields...</p>
         </Card>
+      </div>
+    );
+  }
+
+  // Show warning if no sample data is available
+  if (!Object.keys(sampleData || {}).length && config.dataSources.length > 0 && !isLoadingFields) {
+    return (
+      <div className="transformation-step">
+        <Callout intent={Intent.WARNING} icon="warning-sign">
+          <h4>Sample Data Required</h4>
+          <p>
+            Please go back to the Output Format step and test your data sources to load sample data.
+            This will enable field selection for transformations.
+          </p>
+        </Callout>
       </div>
     );
   }
