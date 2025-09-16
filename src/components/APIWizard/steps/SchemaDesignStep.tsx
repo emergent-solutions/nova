@@ -26,7 +26,7 @@ import {
 } from '@blueprintjs/core';
 import { APIEndpointConfig } from '../../../types/schema.types';
 import { SchemaMapper } from '../../SchemaMapper/SchemaMapper';
-import { generateAutoSchema } from '../../../utils/schemaHelpers';
+import { extractFieldPaths } from '../../JsonFieldMapper/utils/pathHelpers';
 
 interface SchemaDesignStepProps {
   config: APIEndpointConfig;
@@ -229,32 +229,18 @@ const SchemaDesignStep: React.FC<SchemaDesignStepProps> = ({
     );
     
     // Extract data fields
-    const extractFields = (obj: any, prefix = '') => {
-      if (Array.isArray(obj) && obj.length > 0) {
-        extractFields(obj[0], prefix);
-      } else if (obj && typeof obj === 'object') {
-        for (const key in obj) {
-          const fullPath = prefix ? `${prefix}.${key}` : key;
-          const value = obj[key];
-          
-          if (value === null || value === undefined) {
-            fields.push({ path: fullPath, name: fullPath, type: 'unknown' });
-          } else if (Array.isArray(value)) {
-            fields.push({ path: fullPath, name: fullPath, type: 'array' });
-            if (value.length > 0 && typeof value[0] === 'object') {
-              extractFields(value[0], fullPath + '[0]');
-            }
-          } else if (typeof value === 'object') {
-            fields.push({ path: fullPath, name: fullPath, type: 'object' });
-            extractFields(value, fullPath);
-          } else {
-            fields.push({ path: fullPath, name: fullPath, type: typeof value });
-          }
-        }
-      }
-    };
+    const extractedFields = extractFieldPaths(data, '', 3);
+  
+    // Add extracted fields with source information
+    extractedFields.forEach(field => {
+      fields.push({
+        ...field,
+        isMetadata: false,
+        sourceId: sourceId,
+        sourceName: dataSources.find(ds => ds.id === sourceId)?.name || 'Unknown'
+      });
+    });
     
-    extractFields(data);
     return fields;
   };
 

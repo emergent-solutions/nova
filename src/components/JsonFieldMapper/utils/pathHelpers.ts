@@ -47,8 +47,19 @@ export function extractFieldPaths(
     if (depth >= maxDepth || !obj) return;
     
     if (Array.isArray(obj) && obj.length > 0) {
+      // Add the array field itself
+      if (currentPath) {
+        const lastDot = currentPath.lastIndexOf('.');
+        const fieldName = lastDot >= 0 ? currentPath.substring(lastDot + 1) : currentPath;
+        fields.push({
+          path: currentPath,
+          name: fieldName,
+          type: 'array',
+          value: undefined
+        });
+      }
       // For arrays, analyze the first item
-      traverse(obj[0], currentPath, depth);
+      traverse(obj[0], `${currentPath}[*]`, depth);
     } else if (typeof obj === 'object' && obj !== null) {
       Object.keys(obj).forEach(key => {
         const fullPath = currentPath ? `${currentPath}.${key}` : key;

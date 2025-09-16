@@ -14,6 +14,7 @@ import {
   Popover,
   Position
 } from '@blueprintjs/core';
+import { extractFieldPaths } from '../JsonFieldMapper/utils/pathHelpers';
 
 interface MultiSourceFieldMappingProps {
   selection: MultiSourceSelection;
@@ -319,31 +320,19 @@ function extractFieldsFromData(data: any, sourceId: string, sourceName: string):
   );
   
   // Extract data fields
-  const extractFields = (obj: any, prefix = '') => {
-    if (Array.isArray(obj) && obj.length > 0) {
-      extractFields(obj[0], prefix);
-    } else if (obj && typeof obj === 'object') {
-      for (const key in obj) {
-        const fullPath = prefix ? `${prefix}.${key}` : key;
-        const value = obj[key];
-        
-        if (value === null || value === undefined) {
-          fields.push({ path: fullPath, name: fullPath, type: 'unknown' });
-        } else if (Array.isArray(value)) {
-          fields.push({ path: fullPath, name: fullPath, type: 'array' });
-          if (value.length > 0 && typeof value[0] === 'object') {
-            extractFields(value[0], fullPath + '[0]');
-          }
-        } else if (typeof value === 'object') {
-          fields.push({ path: fullPath, name: fullPath, type: 'object' });
-          extractFields(value, fullPath);
-        } else {
-          fields.push({ path: fullPath, name: fullPath, type: typeof value });
-        }
-      }
-    }
-  };
+  const extractedFields = extractFieldPaths(data, '', 3);
   
-  extractFields(data);
+  // Transform extracted fields to match the component's expected format
+  extractedFields.forEach(field => {
+    fields.push({
+      path: field.path,
+      name: field.name || field.path, // Use name if available, otherwise use path
+      type: field.type,
+      value: field.value,
+      sourceId: sourceId,
+      sourceName: sourceName
+    });
+  });
+
   return fields;
 }

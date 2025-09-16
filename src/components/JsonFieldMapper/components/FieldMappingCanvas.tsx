@@ -236,7 +236,7 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
       // Extract data fields from sample data
       if (sampleData[source.id]) {
         let dataToAnalyze = sampleData[source.id];
-        
+
         // Navigate to the primary path if specified
         if (source.primaryPath) {
           const parts = source.primaryPath.split('.');
@@ -248,10 +248,18 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
         }
         
         // Extract fields from the data
-        const extracted = extractFieldPaths(dataToAnalyze, '');
+        const extracted = extractFieldPaths(dataToAnalyze, '', 3);
         extracted.forEach(field => {
+          let cleanPath = field.path;
+          if (source.primaryPath && Array.isArray(dataToAnalyze) && cleanPath.startsWith('[*].')) {
+            cleanPath = cleanPath.substring(4); // Remove '[*].' prefix
+          }
+
           fields.push({
-            ...field,
+            path: cleanPath,
+            name: field.name,
+            type: field.type,
+            value: field.value,
             category: 'data',
             isMetadata: false,
             sourceId: source.id,
