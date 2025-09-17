@@ -403,7 +403,8 @@ async function generateRSSFeed(endpoint, dataSources, supabase) {
   const { channelTitle = "RSS Feed", channelDescription = "RSS Feed Description", channelLink = "https://example.com", sourceMappings = [], mergeStrategy = "sequential", maxItemsPerSource = 0, maxTotalItems = 0 } = metadata;
   console.log("RSS Metadata:", {
     channelTitle,
-    sourceMappings: sourceMappings.length
+    sourceMappings: sourceMappings.length,
+    hasTransformations: !!endpoint.transform_config?.transformations
   });
   // Check if we have multi-source configuration
   const hasMultiSource = sourceMappings && sourceMappings.length > 0;
@@ -430,47 +431,98 @@ async function generateRSSFeed(endpoint, dataSources, supabase) {
         continue;
       }
       // Extract items using the specified path
-      const items = getValueFromPath(sourceData, mapping.itemsPath);
+      let items = getValueFromPath(sourceData, mapping.itemsPath);
       console.log(`Found ${Array.isArray(items) ? items.length : 0} items at path: ${mapping.itemsPath}`);
       if (!Array.isArray(items)) continue;
+      // CRITICAL FIX: Apply transformations to the items AFTER extracting them
+      // This ensures transformations work on the actual item data, not the wrapper
+      if (endpoint.transform_config?.transformations && endpoint.transform_config.transformations.length > 0) {
+        console.log(`Applying transformations to ${items.length} RSS items from ${dataSource.name}...`);
+        // Apply transformations to the items array
+        items = await applyTransformationPipeline(items, endpoint.transform_config, supabase);
+        console.log(`Transformations complete. Resulting items: ${Array.isArray(items) ? items.length : 0}`);
+      }
       // Apply per-source limit
       const limitedItems = maxItemsPerSource > 0 ? items.slice(0, maxItemsPerSource) : items;
-      // Map fields according to configuration
-      const mappedItems = limitedItems.map((item)=>({
-          _sourceId: mapping.sourceId,
-          _sourceName: dataSource.name,
-          title: getValueFromPath(item, mapping.fieldMappings.title) || "Untitled",
-          description: getValueFromPath(item, mapping.fieldMappings.description) || "",
-          link: getValueFromPath(item, mapping.fieldMappings.link) || "#",
-          pubDate: mapping.fieldMappings.pubDate ? formatDate(getValueFromPath(item, mapping.fieldMappings.pubDate)) : new Date().toUTCString(),
-          guid: mapping.fieldMappings.guid ? getValueFromPath(item, mapping.fieldMappings.guid) : getValueFromPath(item, mapping.fieldMappings.link) || Math.random().toString(),
-          author: mapping.fieldMappings.author ? getValueFromPath(item, mapping.fieldMappings.author) : undefined,
-          category: mapping.fieldMappings.category ? getValueFromPath(item, mapping.fieldMappings.category) : undefined
-        }));
-      console.log(`Mapped ${mappedItems.length} items from ${dataSource.name}`);
-      allItems.push(...mappedItems);
+      // Map fields to RSS structure
+      const mappedItems = limitedItems.map((item)=>{
+        const fieldMappings = mapping.fieldMappings || {};
+        // Helper function to get mapped field value
+        const getMappedValue = (rssField, defaultField)=>{
+          const sourceField = fieldMappings[rssField] || defaultField;
+          if (!sourceField) return '';
+          // Handle nested paths
+          if (sourceField.includes('.')) {
+            return getValueFromPath(item, sourceField) || '';
+          }
+          return item[sourceField] || '';
+        };
+        return {
+          title: getMappedValue('title', 'title'),
+          description: getMappedValue('description', 'description'),
+          link: getMappedValue('link', 'link'),
+          pubDate: formatDate(getMappedValue('pubDate', 'pubDate') || getMappedValue('pubDate', 'date') || getMappedValue('pubDate', 'created_at')),
+          guid: getMappedValue('guid', 'guid') || getMappedValue('guid', 'id') || getMappedValue('guid', 'link') || Math.random().toString(),
+          author: getMappedValue('author', 'author'),
+          category: getMappedValue('category', 'category'),
+          _sourceName: dataSource.name
+        };
+      });
+      // Add to combined items
+      allItems = allItems.concat(mappedItems);
+      console.log(`Added ${mappedItems.length} mapped items from ${dataSource.name}`);
     }
     // Apply merge strategy
-    allItems = applyMergeStrategy(allItems, mergeStrategy);
+    if (mergeStrategy === 'interleaved' && allItems.length > 0) {
+      console.log('Applying interleaved merge strategy');
+      const sourceGroups = {};
+      allItems.forEach((item)=>{
+        const source = item._sourceName || 'unknown';
+        if (!sourceGroups[source]) sourceGroups[source] = [];
+        sourceGroups[source].push(item);
+      });
+      allItems = [];
+      let hasMore = true;
+      let index = 0;
+      while(hasMore){
+        hasMore = false;
+        for(const source in sourceGroups){
+          if (index < sourceGroups[source].length) {
+            allItems.push(sourceGroups[source][index]);
+            hasMore = true;
+          }
+        }
+        index++;
+      }
+    }
   } else {
-    console.log("Using single-source RSS generation (fallback)");
-    // Fallback to single-source RSS generation (backward compatibility)
-    const primarySource = dataSources[0];
-    if (primarySource) {
-      const sourceData = await fetchDataFromSource(primarySource, supabase);
-      // Try to find items array (common patterns)
-      let items = sourceData;
-      if (sourceData?.data) items = sourceData.data;
-      if (sourceData?.items) items = sourceData.items;
-      if (sourceData?.articles) items = sourceData.articles;
-      if (Array.isArray(items)) {
-        allItems = items.slice(0, 20).map((item)=>({
-            title: item.title || item.headline || item.name || "Untitled",
-            description: item.description || item.summary || item.content || "",
-            link: item.link || item.url || "#",
-            pubDate: item.pubDate || item.date || item.created_at ? formatDate(item.pubDate || item.date || item.created_at) : new Date().toUTCString(),
-            guid: item.guid || item.id || item.link || Math.random().toString()
-          }));
+    // FALLBACK: Single source mode (backward compatibility)
+    console.log("Using single source mode");
+    if (dataSources.length > 0) {
+      const dataSource = dataSources[0];
+      let sourceData = await fetchDataFromSource(dataSource, supabase);
+      if (sourceData) {
+        // For single source mode, apply transformations to the full data
+        // This maintains backward compatibility with existing JSON endpoints
+        if (endpoint.transform_config?.transformations && endpoint.transform_config.transformations.length > 0) {
+          console.log("Applying transformations to source data...");
+          sourceData = await applyTransformationPipeline(sourceData, endpoint.transform_config, supabase);
+        }
+        // Try to extract array of items
+        let items = sourceData;
+        if (!Array.isArray(items)) {
+          // Look for common array patterns
+          items = sourceData.items || sourceData.data || sourceData.results || sourceData.articles || [];
+        }
+        if (Array.isArray(items)) {
+          allItems = items.map((item)=>({
+              title: item.title || '',
+              description: item.description || item.summary || '',
+              link: item.link || item.url || '',
+              pubDate: formatDate(item.pubDate || item.date || item.created_at) || new Date().toUTCString(),
+              guid: item.guid || item.id || item.link || Math.random().toString()
+            }));
+        }
       }
     }
   }
