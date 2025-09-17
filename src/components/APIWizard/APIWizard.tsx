@@ -167,6 +167,28 @@ export const APIWizard: React.FC<APIWizardProps> = ({
     return {};
   });
 
+  // Check if all required steps are valid
+  const isAllStepsValid = (): boolean => {
+    // Basic validation
+    if (!config.name || !config.slug) return false;
+    
+    // Data sources validation
+    const hasDataSources = selectedDataSources.length > 0 || 
+                          newDataSources.some(ds => ds.name && ds.type);
+    if (!hasDataSources) return false;
+    
+    // All new data sources should be properly configured
+    const allNewSourcesValid = newDataSources.every(ds => 
+      !ds.name || !ds.type || (ds.name && ds.type)
+    );
+    if (!allNewSourcesValid) return false;
+    
+    // Output format should be set
+    if (!config.outputFormat) return false;
+    
+    return true;
+  };
+
   // Force navigation to deployment step when in edit mode after dialog opens
   useEffect(() => {
     if (isOpen && mode === 'edit') {
@@ -665,6 +687,67 @@ export const APIWizard: React.FC<APIWizardProps> = ({
     }
   };
 
+  const handleSave = async () => {
+    setIsDeploying(true);
+    
+    try {
+      // Save data sources if needed
+      await saveAllNewDataSources();
+      
+      const finalConfig = {
+        ...config,
+        dataSources: allDataSources
+      };
+      
+      // Save directly to the database instead of calling onComplete
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not authenticated');
+      
+      // Update the existing endpoint
+      const { data, error } = await supabase
+        .from('api_endpoints')
+        .update({
+          name: finalConfig.name,
+          slug: finalConfig.slug,
+          description: finalConfig.description,
+          output_format: finalConfig.outputFormat,
+          schema_config: {
+            schema: finalConfig.outputSchema,
+            mapping: finalConfig.fieldMappings
+          },
+          transform_config: {
+            transformations: finalConfig.transformations
+          },
+          relationship_config: {
+            relationships: finalConfig.relationships
+          },
+          auth_config: finalConfig.authentication,
+          cache_config: finalConfig.caching,
+          rate_limit_config: finalConfig.rateLimiting,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existingEndpoint.id)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      
+      toaster.show({
+        message: 'Changes saved successfully!',
+        intent: Intent.SUCCESS
+      });
+      
+    } catch (error) {
+      console.error('Save failed:', error);
+      toaster.show({
+        message: 'Failed to save changes. Please try again.',
+        intent: Intent.DANGER
+      });
+    } finally {
+      setIsDeploying(false);
+    }
+  };
+
   const handleClose = () => {
     if (autoDraftId) {
       // Clean up the auto-draft
@@ -728,13 +811,35 @@ export const APIWizard: React.FC<APIWizardProps> = ({
       setCurrentStepId(newStepId);
     }
   };
-  
 
   return (
     <MultistepDialog
       isOpen={isOpen}
       onClose={handleClose}
-      title={mode === 'create' ? 'Create Agent' : `Edit Agent: ${config.name}`}
+      title={
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          width: '100%'
+        }}>
+          <span>{mode === 'create' ? 'Create Agent' : `Edit Agent: ${config.name}`}</span>
+          {mode === 'edit' && isAllStepsValid() && (
+            <Button
+              minimal
+              icon="floppy-disk"
+              title="Save Changes"
+              intent={Intent.PRIMARY}
+              loading={isDeploying}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleSave();
+              }}
+              style={{ marginLeft: 'auto' }}
+            />
+          )}
+        </div>
+      }
       navigationPosition="left"
       showCloseButtonInFooter={false}
       canEscapeKeyClose={true}
@@ -763,6 +868,11 @@ export const APIWizard: React.FC<APIWizardProps> = ({
             {mode === 'edit' && (
               <Callout intent={Intent.PRIMARY} icon="info-sign" style={{ marginBottom: '20px' }}>
                 <strong>Edit Mode:</strong> All steps are now accessible. Navigate using the sidebar or Previous/Next buttons.
+                {isAllStepsValid() && (
+                  <span style={{ display: 'block', marginTop: '10px' }}>
+                    <strong>✓ All required fields are complete.</strong> You can save your changes at any time.
+                  </span>
+                )}
               </Callout>
             )}
             <FormGroup label="Agent Name" labelInfo="(required)">
