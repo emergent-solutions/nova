@@ -348,26 +348,6 @@ const DeploymentStep: React.FC<DeploymentStepProps> = ({
           </div>
         </Card>
       )}
-
-      {/* Deploy Button */}
-      <div className="deployment-actions">
-        {!isDeploying && deploymentProgress !== 100 && (
-          <>
-            <Button
-              text="Validate Configuration"
-              onClick={handleValidate}
-              intent={Intent.NONE}
-            />
-            <Button
-              text="Deploy Agent"
-              intent={Intent.PRIMARY}
-              onClick={handleDeploy}
-              disabled={validation ? !validation.valid : false}
-              icon="cloud-upload"
-            />
-          </>
-        )}
-      </div>
     </div>
   );
 };
