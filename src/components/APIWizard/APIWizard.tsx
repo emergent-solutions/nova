@@ -21,6 +21,7 @@ import TestingStep from './steps/TestingStep';
 import DeploymentStep from './steps/DeploymentStep';
 import { supabase } from '../../lib/supabase';
 import './APIWizard.css';
+import AIAssistant from './components/AIAssistant';
 
 const toaster = Toaster.create({ position: 'top' });
 
@@ -166,6 +167,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
     }
     return {};
   });
+  const [showAIAssistant, setShowAIAssistant] = useState(false);
 
   // Check if all required steps are valid
   const isAllStepsValid = (): boolean => {
@@ -812,226 +814,520 @@ export const APIWizard: React.FC<APIWizardProps> = ({
     }
   };
 
-  return (
-    <MultistepDialog
-      isOpen={isOpen}
-      onClose={handleClose}
-      title={
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center',
-          width: '100%'
-        }}>
-          <span>{mode === 'create' ? 'Create Agent' : `Edit Agent: ${config.name}`}</span>
-          {mode === 'edit' && isAllStepsValid() && (
-            <Button
-              minimal
-              icon="floppy-disk"
-              title="Save Changes"
-              intent={Intent.PRIMARY}
-              loading={isDeploying}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleSave();
-              }}
-              style={{ marginLeft: 'auto' }}
-            />
-          )}
-        </div>
+  const handleApplyAIConfig = async (aiConfig: Partial<APIEndpointConfig>) => {
+    console.log('🎯 Applying AI configuration:', aiConfig);
+    console.log('📋 Full aiConfig object:', JSON.stringify(aiConfig, null, 2));
+    
+    try {
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toaster.show({
+          message: 'You must be logged in to create data sources',
+          intent: Intent.DANGER
+        });
+        return;
       }
-      navigationPosition="left"
-      showCloseButtonInFooter={false}
-      canEscapeKeyClose={true}
-      canOutsideClickClose={false}
-      className="api-wizard-dialog"
-      initialStepIndex={mode === 'edit' ? 9 : 0} // Set to last step index if editing
-      currentStepId={currentStepId}
-      onChange={handleStepChange}
-      nextButtonProps={{
-        disabled: mode === 'create' && !isCurrentStepValid(),
-        loading: isSavingDataSources // Show loading state when saving
-      }}
-      finalButtonProps={{
-        text: mode === 'edit' ? 'Save Changes' : 'Deploy Agent',
-        intent: Intent.PRIMARY,
-        loading: isDeploying,
-        onClick: handleDeploy,
-        disabled: mode === 'create' && !isCurrentStepValid()
-      }}
-    >
-      <DialogStep
-        id="basic"
-        title="Basic Info"
-        panel={
-          <div className="basic-info-step">
-            {mode === 'edit' && (
-              <Callout intent={Intent.PRIMARY} icon="info-sign" style={{ marginBottom: '20px' }}>
-                <strong>Edit Mode:</strong> All steps are now accessible. Navigate using the sidebar or Previous/Next buttons.
-                {isAllStepsValid() && (
-                  <span style={{ display: 'block', marginTop: '10px' }}>
-                    <strong>✓ All required fields are complete.</strong> You can save your changes at any time.
-                  </span>
-                )}
-              </Callout>
+  
+      // Handle data sources - check for both plural and singular forms
+      let dataSourcesToProcess = aiConfig.dataSources;
+      
+      // Fallback: If AI used "dataSource" instead of "dataSources"
+      if (!dataSourcesToProcess && aiConfig.dataSource) {
+        console.log('⚠️ AI used "dataSource" instead of "dataSources", converting...');
+        
+        // Convert single dataSource to dataSources array format
+        const ds = aiConfig.dataSource as any;
+        dataSourcesToProcess = [{
+          id: `${ds.type}_${Date.now()}`,
+          name: aiConfig.name || 'New API Source',
+          type: ds.type || 'api',
+          isNew: true,
+          api_config: {
+            url: ds.url,
+            method: ds.method || 'GET',
+            headers: ds.headers || {},
+            data_path: ds.data_path || ''
+          }
+        }];
+        
+        // Add it to the aiConfig for processing
+        aiConfig.dataSources = dataSourcesToProcess;
+        delete aiConfig.dataSource; // Remove the singular form
+      }
+      
+      if (dataSourcesToProcess && Array.isArray(dataSourcesToProcess)) {
+        console.log('📦 Raw dataSources from AI:', dataSourcesToProcess);
+        console.log('📦 DataSources count:', dataSourcesToProcess.length);
+        
+        // Log each data source details
+        dataSourcesToProcess.forEach((ds, index) => {
+          console.log(`DataSource ${index}:`, {
+            id: ds.id,
+            name: ds.name,
+            type: ds.type,
+            isNew: ds.isNew,
+            hasApiConfig: !!ds.api_config,
+            apiConfigUrl: ds.api_config?.url
+          });
+        });
+        
+        // Try multiple ways to identify new sources
+        const aiNewSources1 = dataSourcesToProcess.filter(ds => ds.isNew === true);
+        console.log('🔍 Filter method 1 (isNew === true):', aiNewSources1);
+        
+        const aiNewSources2 = dataSourcesToProcess.filter(ds => ds.isNew);
+        console.log('🔍 Filter method 2 (isNew):', aiNewSources2);
+        
+        const aiNewSources3 = dataSourcesToProcess.filter(ds => !ds.id || ds.isNew);
+        console.log('🔍 Filter method 3 (!id || isNew):', aiNewSources3);
+        
+        // Use the most inclusive filter
+        const aiNewSources = dataSourcesToProcess.filter(ds => {
+          // Consider it new if:
+          // 1. It has isNew flag set to true
+          // 2. It doesn't have an ID (or has a temporary ID)
+          // 3. It has an API config with a URL (indicating it's a new API source)
+          const shouldCreateNew = ds.isNew === true || 
+                                (!ds.id || ds.id.startsWith('temp_') || ds.id.startsWith('new_')) ||
+                                (ds.type === 'api' && ds.api_config?.url && !ds.id);
+          
+          console.log(`Checking ${ds.name}: isNew=${ds.isNew}, id=${ds.id}, shouldCreate=${shouldCreateNew}`);
+          return shouldCreateNew;
+        });
+        
+        console.log('🆕 Final new data sources to create:', aiNewSources);
+        console.log('🆕 New sources count:', aiNewSources.length);
+        
+        if (aiNewSources.length > 0) {
+          const createdSourceIds: string[] = [];
+          
+          // Save each new data source to the database
+          for (const newSource of aiNewSources) {
+            try {
+              console.log(`💾 Processing data source: ${newSource.name}`);
+              
+              // Check if a data source with this name already exists
+              const { data: existing } = await supabase
+                .from('data_sources')
+                .select('id')
+                .eq('name', newSource.name)
+                .eq('user_id', user.id)
+                .single();
+              
+              if (existing) {
+                console.log(`✅ Using existing data source: ${newSource.name} (ID: ${existing.id})`);
+                createdSourceIds.push(existing.id);
+                newSource.id = existing.id;
+              } else {
+                // Prepare the data source for insertion
+                const dataSourceToInsert = {
+                  name: newSource.name,
+                  type: newSource.type || 'api',
+                  category: newSource.category || 'api',
+                  active: true,
+                  user_id: user.id,
+                  // Include config based on type
+                  ...(newSource.type === 'api' && newSource.api_config ? 
+                    { api_config: newSource.api_config } : {}),
+                  ...(newSource.type === 'database' && newSource.database_config ? 
+                    { database_config: newSource.database_config } : {}),
+                  ...(newSource.type === 'file' && newSource.file_config ? 
+                    { file_config: newSource.file_config } : {})
+                };
+                
+                console.log(`💾 Creating new data source with data:`, dataSourceToInsert);
+                
+                const { data: createdDs, error } = await supabase
+                  .from('data_sources')
+                  .insert(dataSourceToInsert)
+                  .select()
+                  .single();
+                
+                if (error) {
+                  console.error('❌ Failed to create data source:', error);
+                  toaster.show({
+                    message: `Failed to create data source: ${newSource.name}`,
+                    intent: Intent.DANGER
+                  });
+                  continue;
+                }
+                
+                if (createdDs) {
+                  console.log(`✅ Created data source with ID: ${createdDs.id}`, createdDs);
+                  createdSourceIds.push(createdDs.id);
+                  newSource.id = createdDs.id;
+                  
+                  // Add to existing data sources for immediate use
+                  setExistingDataSources(prev => {
+                    console.log('Previous existing sources:', prev.length);
+                    const updated = [...prev, createdDs];
+                    console.log('Updated existing sources:', updated.length);
+                    return updated;
+                  });
+                }
+              }
+            } catch (error) {
+              console.error('❌ Error creating data source:', error);
+              toaster.show({
+                message: `Error creating data source: ${newSource.name}`,
+                intent: Intent.DANGER
+              });
+            }
+          }
+          
+          // Update selected data sources with the created IDs (keep as array)
+          if (createdSourceIds.length > 0) {
+            console.log('📝 Updating selected sources with IDs:', createdSourceIds);
+            
+            setSelectedDataSources(prev => {
+              // Combine previous array with new IDs and remove duplicates
+              const combined = [...prev, ...createdSourceIds];
+              const unique = [...new Set(combined)];
+              console.log('Selected sources updated:', unique);
+              return unique;
+            });
+            
+            toaster.show({
+              message: `Created ${createdSourceIds.length} data source(s) successfully!`,
+              intent: Intent.SUCCESS,
+              icon: 'database'
+            });
+          }
+        } else {
+          console.log('⚠️ No new data sources to create, but dataSources array exists');
+          
+          // If we have data sources but none are marked as new,
+          // they might be references to existing sources
+          if (aiConfig.dataSources.length > 0) {
+            console.log('🔄 Processing as existing source references');
+            
+            const sourceIds = aiConfig.dataSources
+              .map(ds => ds.id)
+              .filter(id => id && !id.startsWith('temp_'));
+            
+            if (sourceIds.length > 0) {
+              setSelectedDataSources(prev => {
+                // Combine arrays and remove duplicates
+                const combined = [...prev, ...sourceIds];
+                const unique = [...new Set(combined)];
+                return unique;
+              });
+              console.log('✅ Selected existing sources:', sourceIds);
+            }
+          }
+        }
+      } else {
+        console.log('⚠️ No dataSources in aiConfig');
+      }
+      
+      // Now update the main config
+      setConfig(prevConfig => {
+        const merged = { ...prevConfig };
+        
+        // Apply all configuration updates
+        Object.entries(aiConfig).forEach(([key, value]) => {
+          console.log(`Merging config key: ${key}`, value);
+          
+          if (key === 'dataSources' && Array.isArray(value)) {
+            merged.dataSources = value;
+          } else if (key === 'transformations' && Array.isArray(value)) {
+            merged.transformations = value;
+          } else if (key === 'fieldMappings' && Array.isArray(value)) {
+            merged.fieldMappings = value;
+          } else if (key === 'outputSchema' && value) {
+            merged.outputSchema = {
+              ...(prevConfig.outputSchema || {}),
+              ...value,
+              metadata: {
+                ...(prevConfig.outputSchema?.metadata || {}),
+                ...(value.metadata || {})
+              }
+            };
+          } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+            merged[key] = { ...(prevConfig[key] || {}), ...value };
+          } else {
+            merged[key] = value;
+          }
+        });
+        
+        console.log('✨ Final merged configuration:', merged);
+        return merged;
+      });
+      
+      // Navigation logic
+      let targetStep = currentStepId;
+      let message = 'Configuration applied successfully!';
+      
+      if (aiConfig.fieldMappings || aiConfig.outputSchema) {
+        targetStep = 'schema';
+        message = 'Field mappings configured!';
+      } else if (aiConfig.transformations) {
+        targetStep = 'transformation';
+        message = 'Transformations configured!';
+      }
+      
+      toaster.show({
+        message,
+        intent: Intent.SUCCESS,
+        icon: 'tick-circle'
+      });
+      
+      if (targetStep !== currentStepId) {
+        setCurrentStepId(targetStep);
+      }
+      
+      setShowAIAssistant(false);
+      
+    } catch (error) {
+      console.error('❌ Error applying AI configuration:', error);
+      toaster.show({
+        message: 'Failed to apply configuration',
+        intent: Intent.DANGER
+      });
+    }
+  };
+
+  return (
+    <>    
+      <MultistepDialog
+        isOpen={isOpen}
+        onClose={handleClose}
+        title={
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            width: '100%'
+          }}>
+            <span>{mode === 'create' ? 'Create Agent' : `Edit Agent: ${config.name}`}</span>
+            <Button
+              icon="predictive-analysis"
+              text="AI Assistant"
+              intent={Intent.PRIMARY}
+              onClick={() => setShowAIAssistant(true)}
+              minimal
+              style={{
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                color: 'white'
+              }}
+            />
+            {mode === 'edit' && isAllStepsValid() && (
+              <Button
+                minimal
+                icon="floppy-disk"
+                title="Save Changes"
+                intent={Intent.PRIMARY}
+                loading={isDeploying}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSave();
+                }}
+                style={{ marginLeft: 'auto' }}
+              />
             )}
-            <FormGroup label="Agent Name" labelInfo="(required)">
-              <InputGroup
-                value={config.name}
-                onChange={(e) => updateConfig({ name: e.target.value })}
-                placeholder="My Agent"
-              />
-            </FormGroup>
-            
-            <FormGroup label="URL Slug" labelInfo="(required)">
-              <InputGroup
-                value={config.slug}
-                onChange={(e) => updateConfig({ slug: e.target.value })}
-                placeholder="my-api-endpoint"
-                leftIcon="link"
-              />
-              {config.slug && (
-                <Callout intent={Intent.PRIMARY} style={{ marginTop: '10px' }}>
-                  Your API will be available at: <code>/api/{config.slug}</code>
-                </Callout>
-              )}
-            </FormGroup>
-            
-            <FormGroup label="Description">
-              <InputGroup
-                value={config.description || ''}
-                onChange={(e) => updateConfig({ description: e.target.value })}
-                placeholder="Describe what this endpoint does..."
-              />
-            </FormGroup>
           </div>
         }
-      />
-      
-      <DialogStep
-        id="datasources"
-        title="Data Sources"
-        panel={
-          <DataSourcesStep
-            existingDataSources={existingDataSources}
-            newDataSources={newDataSources}
-            selectedDataSources={selectedDataSources}
-            onSelectExisting={(ids) => setSelectedDataSources(ids)}
-            onAddNew={handleAddNewDataSource}
-            onUpdateNew={updateNewDataSource}
-            onRemoveNew={removeNewDataSource}
-          />
-        }
-      />
-      
-      {newDataSources.length > 0 && (
+        navigationPosition="left"
+        showCloseButtonInFooter={false}
+        canEscapeKeyClose={true}
+        canOutsideClickClose={false}
+        className="api-wizard-dialog"
+        initialStepIndex={mode === 'edit' ? 9 : 0} // Set to last step index if editing
+        currentStepId={currentStepId}
+        onChange={handleStepChange}
+        nextButtonProps={{
+          disabled: mode === 'create' && !isCurrentStepValid(),
+          loading: isSavingDataSources // Show loading state when saving
+        }}
+        finalButtonProps={{
+          text: mode === 'edit' ? 'Save Changes' : 'Deploy Agent',
+          intent: Intent.PRIMARY,
+          loading: isDeploying,
+          onClick: handleDeploy,
+          disabled: mode === 'create' && !isCurrentStepValid()
+        }}
+      >
         <DialogStep
-          id="configure-source"
-          title="Configure New Sources"
+          id="basic"
+          title="Basic Info"
           panel={
-            <div>
-              {/* Add a status bar at the top */}
-              {newDataSources.some(ds => !ds.id) && (
-                <Callout intent={Intent.WARNING} icon="info-sign" style={{ marginBottom: '20px' }}>
-                  <strong>Note:</strong> Data sources will be automatically saved when you click Next.
-                  {newDataSources.filter(ds => !ds.id && ds.name && ds.type).length > 0 && (
-                    <span> ({newDataSources.filter(ds => !ds.id && ds.name && ds.type).length} unsaved)</span>
+            <div className="basic-info-step">
+              {mode === 'edit' && (
+                <Callout intent={Intent.PRIMARY} icon="info-sign" style={{ marginBottom: '20px' }}>
+                  <strong>Edit Mode:</strong> All steps are now accessible. Navigate using the sidebar or Previous/Next buttons.
+                  {isAllStepsValid() && (
+                    <span style={{ display: 'block', marginTop: '10px' }}>
+                      <strong>✓ All required fields are complete.</strong> You can save your changes at any time.
+                    </span>
                   )}
                 </Callout>
               )}
+              <FormGroup label="Agent Name" labelInfo="(required)">
+                <InputGroup
+                  value={config.name}
+                  onChange={(e) => updateConfig({ name: e.target.value })}
+                  placeholder="My Agent"
+                />
+              </FormGroup>
               
-              {/* Add save status for each data source */}
-              {newDataSources.every(ds => ds.id || (!ds.name || !ds.type)) && newDataSources.length > 0 && (
-                <Callout intent={Intent.SUCCESS} icon="tick" style={{ marginBottom: '20px' }}>
-                  All configured data sources have been saved!
-                </Callout>
-              )}
+              <FormGroup label="URL Slug" labelInfo="(required)">
+                <InputGroup
+                  value={config.slug}
+                  onChange={(e) => updateConfig({ slug: e.target.value })}
+                  placeholder="my-api-endpoint"
+                  leftIcon="link"
+                />
+                {config.slug && (
+                  <Callout intent={Intent.PRIMARY} style={{ marginTop: '10px' }}>
+                    Your API will be available at: <code>/api/{config.slug}</code>
+                  </Callout>
+                )}
+              </FormGroup>
               
-              <DataSourceConfigStep
-                dataSources={newDataSources}
-                onUpdate={updateNewDataSource}
-              />
+              <FormGroup label="Description">
+                <InputGroup
+                  value={config.description || ''}
+                  onChange={(e) => updateConfig({ description: e.target.value })}
+                  placeholder="Describe what this endpoint does..."
+                />
+              </FormGroup>
             </div>
           }
         />
-      )}
-      
-      <DialogStep
-        id="relationships"
-        title="Relationships"
-        panel={
-          <RelationshipsStep
-            config={config}
-            onUpdate={updateConfig}
-            availableDataSources={allDataSources}
+        
+        <DialogStep
+          id="datasources"
+          title="Data Sources"
+          panel={
+            <DataSourcesStep
+              existingDataSources={existingDataSources}
+              newDataSources={newDataSources}
+              selectedDataSources={selectedDataSources}
+              onSelectExisting={(ids) => setSelectedDataSources(ids)}
+              onAddNew={handleAddNewDataSource}
+              onUpdateNew={updateNewDataSource}
+              onRemoveNew={removeNewDataSource}
+            />
+          }
+        />
+        
+        {newDataSources.length > 0 && (
+          <DialogStep
+            id="configure-source"
+            title="Configure New Sources"
+            panel={
+              <div>
+                {/* Add a status bar at the top */}
+                {newDataSources.some(ds => !ds.id) && (
+                  <Callout intent={Intent.WARNING} icon="info-sign" style={{ marginBottom: '20px' }}>
+                    <strong>Note:</strong> Data sources will be automatically saved when you click Next.
+                    {newDataSources.filter(ds => !ds.id && ds.name && ds.type).length > 0 && (
+                      <span> ({newDataSources.filter(ds => !ds.id && ds.name && ds.type).length} unsaved)</span>
+                    )}
+                  </Callout>
+                )}
+                
+                {/* Add save status for each data source */}
+                {newDataSources.every(ds => ds.id || (!ds.name || !ds.type)) && newDataSources.length > 0 && (
+                  <Callout intent={Intent.SUCCESS} icon="tick" style={{ marginBottom: '20px' }}>
+                    All configured data sources have been saved!
+                  </Callout>
+                )}
+                
+                <DataSourceConfigStep
+                  dataSources={newDataSources}
+                  onUpdate={updateNewDataSource}
+                />
+              </div>
+            }
           />
-        }
+        )}
+        
+        <DialogStep
+          id="relationships"
+          title="Relationships"
+          panel={
+            <RelationshipsStep
+              config={config}
+              onUpdate={updateConfig}
+              availableDataSources={allDataSources}
+            />
+          }
+        />
+        
+        <DialogStep
+          id="format"
+          title="Output Format"
+          panel={
+            <OutputFormatStep
+              config={{
+                ...config,
+                dataSources: allDataSources
+              }}
+              onUpdate={updateConfig}
+              initialSampleData={sampleData}
+              onSampleDataChange={setSampleData}
+            />
+          }
+        />
+        
+        <DialogStep
+          id="transformations"
+          title="Transformations"
+          panel={
+            <TransformationStep
+              config={config}
+              onUpdate={updateConfig}
+              sampleData={sampleData}
+            />
+          }
+        />
+        
+        <DialogStep
+          id="authentication"
+          title="Security"
+          panel={
+            <AuthenticationStep
+              config={config}
+              onUpdate={updateConfig}
+              onDraftCreated={handleAutoDraftCreated}
+            />
+          }
+        />
+        
+        <DialogStep
+          id="testing"
+          title="Test"
+          panel={
+            <TestingStep
+              config={config}
+              onUpdate={updateConfig}
+            />
+          }
+        />
+        
+        <DialogStep
+          id="deployment"
+          title="Deploy"
+          panel={
+            <DeploymentStep
+              config={config}
+              onDeploy={handleDeploy}
+              isDeploying={isDeploying}
+              mode={mode}
+            />
+          }
+        />
+      </MultistepDialog>
+      <AIAssistant
+        isOpen={showAIAssistant}
+        onClose={() => setShowAIAssistant(false)}
+        config={config}
+        onApplyConfig={handleApplyAIConfig}
+        dataSources={[...existingDataSources, ...newDataSources]}
       />
-      
-      <DialogStep
-        id="format"
-        title="Output Format"
-        panel={
-          <OutputFormatStep
-            config={{
-              ...config,
-              dataSources: allDataSources
-            }}
-            onUpdate={updateConfig}
-            initialSampleData={sampleData}
-            onSampleDataChange={setSampleData}
-          />
-        }
-      />
-      
-      <DialogStep
-        id="transformations"
-        title="Transformations"
-        panel={
-          <TransformationStep
-            config={config}
-            onUpdate={updateConfig}
-            sampleData={sampleData}
-          />
-        }
-      />
-      
-      <DialogStep
-        id="authentication"
-        title="Security"
-        panel={
-          <AuthenticationStep
-            config={config}
-            onUpdate={updateConfig}
-            onDraftCreated={handleAutoDraftCreated}
-          />
-        }
-      />
-      
-      <DialogStep
-        id="testing"
-        title="Test"
-        panel={
-          <TestingStep
-            config={config}
-            onUpdate={updateConfig}
-          />
-        }
-      />
-      
-      <DialogStep
-        id="deployment"
-        title="Deploy"
-        panel={
-          <DeploymentStep
-            config={config}
-            onDeploy={handleDeploy}
-            isDeploying={isDeploying}
-            mode={mode}
-          />
-        }
-      />
-    </MultistepDialog>
+    </>
   );
 };
 

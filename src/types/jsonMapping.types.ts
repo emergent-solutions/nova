@@ -1,4 +1,14 @@
 // JSON Mapping specific types
+export interface JsonFieldMapperProps {
+  mapping: JsonFieldMapping;
+  onUpdate?: (mapping: JsonFieldMapping) => void;
+  onDelete?: (id: string) => void;
+  availableSources?: DataSourceSelection[];
+  availableTransformations?: MappingTransformation[];
+  readonly?: boolean;
+  className?: string;
+}
+
 export interface JsonMappingConfig {
   sourceSelection: SourceSelection;
   outputTemplate: OutputTemplate;

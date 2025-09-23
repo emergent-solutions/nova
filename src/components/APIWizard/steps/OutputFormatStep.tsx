@@ -26,6 +26,8 @@ import { DataSource } from '../../../types/datasource.types';
 import { useFetchProxy } from '../../../hooks/useFetchProxy';
 import { JsonFieldMapper } from '../../JsonFieldMapper';
 import { OpenAPIImport } from '../components/OpenAPIImport';
+import { extractFields } from '../../JsonFieldMapper/utils/fieldExtraction';
+
 
 // Helper to extract field paths
 function extractFieldPaths(obj: any, prefix = ''): Array<{ path: string; display: string }> {
@@ -868,7 +870,7 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate, i
           
           // The data from fetchViaProxy is in result.data
           let data = result.data;
-
+  
           setSampleData(prev => ({
             ...prev,
             [source.id]: data // Store the full response data
@@ -967,7 +969,7 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate, i
         ];
       }
       
-      // Rest of the function remains the same...
+      // Store discovered fields and update data sources
       if (fields.length > 0) {
         setDiscoveredFields(prev => ({
           ...prev,
@@ -980,7 +982,25 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate, i
             : s
         );
         
-        onUpdate({ dataSources: updatedSources });
+        // Log current mappings before update
+        console.log('Current field mappings before update:', config.fieldMappings);
+        console.log('Current output schema before update:', config.outputSchema);
+        
+        // Only update data sources, explicitly preserve other configurations
+        onUpdate({ 
+          dataSources: updatedSources,
+          // Explicitly preserve field mappings if they exist
+          ...(config.fieldMappings && config.fieldMappings.length > 0 ? {
+            fieldMappings: config.fieldMappings
+          } : {}),
+          // Explicitly preserve output schema if it exists
+          ...(config.outputSchema ? {
+            outputSchema: config.outputSchema
+          } : {})
+        });
+        
+        // Log after update to confirm preservation
+        console.log('Field mappings preserved:', config.fieldMappings?.length || 0, 'mappings');
         
         AppToaster.show({
           message: `Discovered ${fields.length} fields from ${source.name}`,
@@ -1309,6 +1329,133 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate, i
         )}
       </Card>
     );
+  };
+
+  // Function to convert AI-generated field mappings to the format expected by JsonFieldMapper
+  const convertFieldMappingsFormat = (fieldMappings: any[]): any[] => {
+    if (!fieldMappings || !Array.isArray(fieldMappings)) return [];
+    
+    return fieldMappings.map(mapping => {
+      // Check if it's already in the correct format
+      if (mapping.targetPath && mapping.sourcePath) {
+        return mapping; // Already correct format
+      }
+      
+      // Convert from AI format to JsonFieldMapper format
+      return {
+        targetPath: mapping.target_field || mapping.targetPath,
+        sourcePath: mapping.source_field || mapping.sourcePath,
+        sourceId: mapping.sourceId || mapping.source_id || config.dataSources[0]?.id, // Use first data source if not specified
+        transformation: mapping.transform_type ? {
+          type: mapping.transform_type,
+          config: mapping.transform_config || {}
+        } : null,
+        fallbackValue: mapping.fallback_value || mapping.fallbackValue || null,
+        conditional: mapping.conditions ? {
+          condition: mapping.conditions[0],
+          then: mapping.conditions[0]?.result,
+          else: mapping.fallback_value
+        } : null
+      };
+    });
+  };
+
+  const sourceSelectionType = (() => {
+    // Check if we have sample data to determine the type
+    if (sampleData && config.dataSources.length > 0) {
+      const firstSourceId = config.dataSources[0].id;
+      const firstSourceData = sampleData[firstSourceId];
+      
+      if (firstSourceData) {
+        // Navigate to data_path if specified
+        const apiConfig = config.dataSources[0].api_config;
+        let targetData = firstSourceData;
+        
+        if (apiConfig?.data_path) {
+          const pathParts = apiConfig.data_path.split('.');
+          for (const part of pathParts) {
+            if (targetData && typeof targetData === 'object' && part in targetData) {
+              targetData = targetData[part];
+            }
+          }
+        }
+        
+        // Return 'array' if the data is an array, 'object' otherwise
+        return Array.isArray(targetData) ? 'array' : 'object';
+      }
+    }
+    
+    // Default to array for multiple items
+    return 'array';
+  })();
+
+  const outputFields = (() => {
+    // Option A: If you have field mappings, create fields from them
+    if (config.fieldMappings && config.fieldMappings.length > 0) {
+      // Get unique target fields from mappings
+      const fieldMap = new Map();
+      
+      config.fieldMappings.forEach(mapping => {
+        const fieldName = mapping.target_field || mapping.targetPath;
+        if (!fieldMap.has(fieldName)) {
+          fieldMap.set(fieldName, {
+            path: fieldName,
+            name: fieldName.charAt(0).toUpperCase() + fieldName.slice(1), // Capitalize first letter
+            type: mapping.transform_type === 'parse-number' ? 'number' : 'string',
+            required: true,
+            defaultValue: null
+          });
+        }
+      });
+      
+      return Array.from(fieldMap.values());
+    }
+    
+    // Option B: If you have an output schema, extract fields from it
+    if (config.outputSchema?.root?.children && config.outputSchema.root.children.length > 0) {
+      return config.outputSchema.root.children.map(child => ({
+        path: child.key,
+        name: child.key.charAt(0).toUpperCase() + child.key.slice(1),
+        type: child.type || 'string',
+        required: child.required !== false,
+        defaultValue: child.default || null
+      }));
+    }
+    
+    // Option D: Default generic fields
+    return [
+      { path: 'id', name: 'ID', type: 'string', required: false, defaultValue: null },
+      { path: 'title', name: 'Title', type: 'string', required: true, defaultValue: null },
+      { path: 'description', name: 'Description', type: 'string', required: false, defaultValue: null },
+      { path: 'value', name: 'Value', type: 'string', required: false, defaultValue: null }
+    ];
+  })();
+
+  const handleJsonMappingChange = (newConfig: any) => {
+    console.log('JsonFieldMapper config changed:', newConfig);
+    
+    // Convert back to your format if needed
+    const convertedMappings = newConfig.fieldMappings?.map(mapping => ({
+      id: mapping.id || `map_${Date.now()}_${Math.random()}`,
+      target_field: mapping.targetPath,
+      source_field: mapping.sourcePath,
+      source_id: mapping.sourceId,
+      transform_type: mapping.transformation?.type,
+      transform_config: mapping.transformation?.config
+    })) || [];
+    
+    // Update your config
+    onUpdate({
+      fieldMappings: convertedMappings,
+      outputSchema: {
+        ...config.outputSchema,
+        // Update schema based on the new configuration
+        metadata: {
+          ...config.outputSchema?.metadata,
+          jsonMappingConfig: newConfig
+        }
+      }
+    });
   };
 
   return (
@@ -1698,112 +1845,40 @@ const OutputFormatStep: React.FC<OutputFormatStepProps> = ({ config, onUpdate, i
                     <JsonFieldMapper
                       dataSources={config.dataSources}
                       sampleData={sampleData}
-                      initialConfig={formatOptions.jsonMappingConfig}
-                      onChange={(mappingConfig) => {
-                        updateFormatOption('jsonMappingConfig', mappingConfig);
-
-                        onUpdate({
-                          outputSchema: {
-                            ...config.outputSchema,
-                            metadata: {
-                              ...config.outputSchema?.metadata,
-                              jsonMappingConfig: mappingConfig // This includes sourceSelection with mergeMode
-                            }
+                      initialConfig={{
+                        sourceSelection: {
+                          type: sourceSelectionType,
+                          sources: config.dataSources.map(ds => ({
+                            id: ds.id,
+                            name: ds.name,
+                            type: ds.type,
+                            primaryPath: ds.api_config?.data_path || '',
+                            category: ds.category
+                          })),
+                          mergeMode: config.outputSchema?.metadata?.jsonMappingConfig?.sourceSelection?.mergeMode || 'separate'
+                        },
+                        outputTemplate: {
+                          structure: {},
+                          fields: outputFields
+                        },
+                        // Convert the field mappings to the correct format
+                        fieldMappings: convertFieldMappingsFormat(config.fieldMappings),
+                        transformations: [],
+                        outputWrapper: {
+                          enabled: formatOptions.wrapResponse || false,
+                          wrapperKey: formatOptions.rootElement || 'data',
+                          includeMetadata: formatOptions.includeMetadata || false,
+                          metadataFields: {
+                            timestamp: true,
+                            source: true,
+                            count: true,
+                            version: false
                           }
-                        });
-                        
-                        // Only show toast after initial mount
-                        if (!isInitialMount.current) {
-                          AppToaster.show({
-                            message: 'Mapping configuration updated',
-                            intent: Intent.SUCCESS,
-                            timeout: 2000
-                          });
-                        } else {
-                          isInitialMount.current = false;
                         }
                       }}
-                      onTest={async () => {
-                        console.log('Testing JSON mapping configuration...');
-                        
-                        try {
-                          // Validate configuration first
-                          if (!formatOptions.jsonMappingConfig) {
-                            throw new Error('No mapping configuration to test');
-                          }
-
-                          // Show loading state
-                          AppToaster.show({
-                            message: 'Testing mapping configuration...',
-                            intent: Intent.NONE,
-                            timeout: 0,
-                            icon: <Spinner size={16} />
-                          });
-
-                          // Import the mapping helper
-                          const { applyMappingToData, validateMappingConfig } = 
-                            await import('../../JsonFieldMapper/utils/mappingHelpers');
-
-                          // Validate the configuration
-                          const validation = validateMappingConfig(formatOptions.jsonMappingConfig);
-                          if (!validation.valid) {
-                            throw new Error(`Configuration errors: ${validation.errors.join(', ')}`);
-                          }
-
-                          // Get the source data
-                          const sourceId = formatOptions.jsonMappingConfig.sourceSelection?.sources[0]?.id;
-                          if (!sourceId || !sampleData[sourceId]) {
-                            throw new Error('No sample data available for the selected source');
-                          }
-
-                          // Apply the mapping to sample data
-                          const testResult = applyMappingToData(
-                            { [sourceId]: sampleData[sourceId] },
-                            formatOptions.jsonMappingConfig
-                          );
-
-                          // Clear loading toast
-                          AppToaster.clear();
-
-                          // Show success with preview
-                          AppToaster.show({
-                            message: (
-                              <div>
-                                <strong>Test Successful!</strong>
-                                <br />
-                                <small>Output: {JSON.stringify(testResult).substring(0, 100)}...</small>
-                              </div>
-                            ),
-                            intent: Intent.SUCCESS,
-                            timeout: 5000
-                          });
-
-                          // Log full result for debugging
-                          console.log('Test Result:', testResult);
-
-                          // Optionally open a modal with full preview
-                          // setPreviewModalData(testResult);
-                          // setShowPreviewModal(true);
-
-                        } catch (error) {
-                          console.error('Mapping test failed:', error);
-                          
-                          // Clear any loading toasts
-                          AppToaster.clear();
-                          
-                          // Show error toast
-                          AppToaster.show({
-                            message: (
-                              <div>
-                                <strong>Test Failed</strong>
-                                <br />
-                                <small>{error.message}</small>
-                              </div>
-                            ),
-                            intent: Intent.DANGER,
-                            timeout: 5000
-                          });
-                        }
+                      onChange={handleJsonMappingChange}
+                      onTest={() => {
+                        console.log('Test mapping clicked');
                       }}
                     />
 

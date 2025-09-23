@@ -79,29 +79,49 @@ async function applyTransformation(
   }
 }
 
-export function getValueFromPath(obj: any, path: string): any {
-  if (!path) return obj;
+function getValueFromPath(obj: any, path: string): any {
+  if (!obj || !path) return null;
   
-  const parts = path.split(".");
+  // Handle paths with array indices like "competitions[0].competitors[1].score"
+  const segments = path.split('.');
   let current = obj;
   
-  for (const part of parts) {
-    if (current === null || current === undefined) return undefined;
+  for (const segment of segments) {
+    // Check if segment contains array index
+    const arrayMatch = segment.match(/^(.+?)\[(\d+)\]$/);
     
-    // Handle array notation like items[0] or items[*]
-    const arrayMatch = part.match(/^(.+)\[(\*|\d+)\]$/);
     if (arrayMatch) {
-      const [, field, index] = arrayMatch;
-      current = current[field];
+      // Extract property name and index
+      const [, propName, index] = arrayMatch;
       
-      if (index === "*") {
-        // Return array as-is for wildcard
-        return current;
+      // Navigate to property
+      if (current && typeof current === 'object' && propName in current) {
+        current = current[propName];
+      } else if (propName === '') {
+        // Direct array access like [0]
+        // current stays the same
       } else {
-        current = current[parseInt(index)];
+        return null;
+      }
+      
+      // Apply array index
+      const idx = parseInt(index, 10);
+      if (Array.isArray(current) && !isNaN(idx) && idx < current.length) {
+        current = current[idx];
+      } else {
+        return null;
       }
     } else {
-      current = current[part];
+      // Regular property access
+      if (current && typeof current === 'object' && segment in current) {
+        current = current[segment];
+      } else {
+        return null;
+      }
+    }
+    
+    if (current === null || current === undefined) {
+      return null;
     }
   }
   
