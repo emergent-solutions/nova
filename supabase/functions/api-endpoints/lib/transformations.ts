@@ -79,93 +79,7 @@ async function applyTransformation(
   }
 }
 
-function getValueFromPath(obj: any, path: string): any {
-  if (!obj || !path) return null;
-  
-  // Handle paths with array indices like "competitions[0].competitors[1].score"
-  const segments = path.split('.');
-  let current = obj;
-  
-  for (const segment of segments) {
-    // Check if segment contains array index
-    const arrayMatch = segment.match(/^(.+?)\[(\d+)\]$/);
-    
-    if (arrayMatch) {
-      // Extract property name and index
-      const [, propName, index] = arrayMatch;
-      
-      // Navigate to property
-      if (current && typeof current === 'object' && propName in current) {
-        current = current[propName];
-      } else if (propName === '') {
-        // Direct array access like [0]
-        // current stays the same
-      } else {
-        return null;
-      }
-      
-      // Apply array index
-      const idx = parseInt(index, 10);
-      if (Array.isArray(current) && !isNaN(idx) && idx < current.length) {
-        current = current[idx];
-      } else {
-        return null;
-      }
-    } else {
-      // Regular property access
-      if (current && typeof current === 'object' && segment in current) {
-        current = current[segment];
-      } else {
-        return null;
-      }
-    }
-    
-    if (current === null || current === undefined) {
-      return null;
-    }
-  }
-  
-  return current;
-}
-
-export function setValueAtPath(obj: any, path: string, value: any): void {
-  const parts = path.split(".");
-  let current = obj;
-  
-  for (let i = 0; i < parts.length - 1; i++) {
-    if (!(parts[i] in current)) {
-      current[parts[i]] = {};
-    }
-    current = current[parts[i]];
-  }
-  
-  current[parts[parts.length - 1]] = value;
-}
-
-function evaluateCondition(value: any, operator: string, compareValue: any): boolean {
-  switch (operator) {
-    case "equals":
-      return value === compareValue;
-    case "not_equals":
-      return value !== compareValue;
-    case "contains":
-      return String(value).includes(String(compareValue));
-    case "not_contains":
-      return !String(value).includes(String(compareValue));
-    case "greater_than":
-      return Number(value) > Number(compareValue);
-    case "less_than":
-      return Number(value) < Number(compareValue);
-    case "is_empty":
-      return !value || value === "";
-    case "is_not_empty":
-      return !!value && value !== "";
-    default:
-      return true;
-  }
-}
-
-function applyStringTransformation(data: any, type: string, config: any): any {
+export function applyStringTransformation(data: any, type: string, config: any): any {
   const transform = (str: string) => {
     switch (type) {
       case "uppercase":
@@ -200,4 +114,145 @@ function applyStringTransformation(data: any, type: string, config: any): any {
   }
   
   return data;
+}
+
+export function getValueFromPath(obj: any, path: string): any {
+  if (!obj || !path) return null;
+  
+  // Handle paths with array indices like "competitions[0].competitors[1].score"
+  const segments = path.split(/[\.\[\]]+/).filter(Boolean);
+  let current = obj;
+  
+  for (const segment of segments) {
+    if (current === null || current === undefined) {
+      return undefined;
+    }
+    
+    // Check if segment is a number (array index)
+    if (/^\d+$/.test(segment)) {
+      const index = parseInt(segment, 10);
+      if (Array.isArray(current)) {
+        current = current[index];
+      } else {
+        return undefined;
+      }
+    }
+    // Handle wildcard [*] - return first item for preview
+    else if (segment === '*') {
+      if (Array.isArray(current) && current.length > 0) {
+        current = current[0];
+      } else {
+        return undefined;
+      }
+    }
+    // Regular property access
+    else {
+      if (typeof current === 'object' && current !== null) {
+        current = current[segment];
+      } else {
+        return undefined;
+      }
+    }
+  }
+  
+  return current;
+}
+
+export function setValueAtPath(obj: any, path: string, value: any): any {
+  if (!path) return value;
+  
+  const segments = path.split(/[\.\[\]]+/).filter(Boolean);
+  const result = obj ? JSON.parse(JSON.stringify(obj)) : {};
+  
+  let current = result;
+  
+  for (let i = 0; i < segments.length - 1; i++) {
+    const segment = segments[i];
+    const nextSegment = segments[i + 1];
+    
+    // Check if segment is a number (array index)
+    if (/^\d+$/.test(segment)) {
+      const index = parseInt(segment, 10);
+      
+      // Ensure current is an array
+      if (!Array.isArray(current)) {
+        console.warn(`Expected array at path segment ${segment}, got ${typeof current}`);
+        return result;
+      }
+      
+      // Ensure array has this index
+      while (current.length <= index) {
+        current.push(null);
+      }
+      
+      // Create next level if needed
+      if (current[index] === null || current[index] === undefined) {
+        current[index] = /^\d+$/.test(nextSegment) ? [] : {};
+      }
+      
+      current = current[index];
+    } else {
+      // Regular property access
+      if (!current[segment]) {
+        current[segment] = /^\d+$/.test(nextSegment) ? [] : {};
+      }
+      current = current[segment];
+    }
+  }
+  
+  // Set the final value
+  const lastSegment = segments[segments.length - 1];
+  if (/^\d+$/.test(lastSegment)) {
+    const index = parseInt(lastSegment, 10);
+    if (Array.isArray(current)) {
+      current[index] = value;
+    }
+  } else {
+    current[lastSegment] = value;
+  }
+  
+  return result;
+}
+
+// Also export the evaluateCondition function since it's used by other modules
+export function evaluateCondition(value: any, operator: string, compareValue: any): boolean {
+  switch (operator) {
+    case "equals":
+      return value === compareValue;
+    case "not_equals":
+      return value !== compareValue;
+    case "contains":
+      return String(value).includes(String(compareValue));
+    case "starts_with":
+      return String(value).startsWith(String(compareValue));
+    case "ends_with":
+      return String(value).endsWith(String(compareValue));
+    case "greater_than":
+      return Number(value) > Number(compareValue);
+    case "less_than":
+      return Number(value) < Number(compareValue);
+    case "greater_than_or_equal":
+      return Number(value) >= Number(compareValue);
+    case "less_than_or_equal":
+      return Number(value) <= Number(compareValue);
+    case "in":
+      return Array.isArray(compareValue) && compareValue.includes(value);
+    case "not_in":
+      return Array.isArray(compareValue) && !compareValue.includes(value);
+    case "regex":
+      try {
+        const regex = new RegExp(compareValue);
+        return regex.test(String(value));
+      } catch {
+        return false;
+      }
+    case "is_empty":
+      return value === null || value === undefined || value === "" || 
+             (Array.isArray(value) && value.length === 0);
+    case "is_not_empty":
+      return value !== null && value !== undefined && value !== "" &&
+             (!Array.isArray(value) || value.length > 0);
+    default:
+      return false;
+  }
 }
