@@ -169,6 +169,12 @@ export const APIWizard: React.FC<APIWizardProps> = ({
   });
   const [showAIAssistant, setShowAIAssistant] = useState(false);
 
+  // Helper function to check if a string is a valid UUID
+  const isValidUUID = (str: string): boolean => {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(str);
+  };
+
   // Check if all required steps are valid
   const isAllStepsValid = (): boolean => {
     // Basic validation
@@ -381,6 +387,83 @@ export const APIWizard: React.FC<APIWizardProps> = ({
         throw new Error('No authenticated user');
       }
 
+      const allSourceIds = new Set<string>();
+
+      console.log('=== COLLECTING SOURCE IDS ===');
+
+      // 1. From selectedDataSources
+      console.log('1. selectedDataSources:', selectedDataSources);
+      selectedDataSources.forEach(id => {
+        console.log(`  - Checking selectedDataSource: "${id}" - Valid UUID: ${isValidUUID(id)}`);
+        if (isValidUUID(id)) {
+          allSourceIds.add(id);
+        }
+      });
+
+      // 2. From newDataSources that have IDs
+      console.log('2. newDataSources:', newDataSources);
+      newDataSources.forEach(ds => {
+        if (ds.id) {
+          console.log(`  - Checking newDataSource ID: "${ds.id}" - Valid UUID: ${isValidUUID(ds.id)}`);
+          if (isValidUUID(ds.id)) {
+            allSourceIds.add(ds.id);
+          }
+        }
+      });
+
+      // 3. From config.dataSources
+      console.log('3. config.dataSources:', config.dataSources);
+      config.dataSources?.forEach(ds => {
+        if (ds.id) {
+          console.log(`  - Checking config.dataSource ID: "${ds.id}" - Valid UUID: ${isValidUUID(ds.id)}`);
+          if (isValidUUID(ds.id)) {
+            allSourceIds.add(ds.id);
+          }
+        }
+      });
+
+      // 4. From field mappings
+      console.log('4. config.fieldMappings:', config.fieldMappings);
+      config.fieldMappings?.forEach(mapping => {
+        const sourceId = mapping.source_id || mapping.sourceId;
+        if (sourceId) {
+          console.log(`  - Checking fieldMapping source: "${sourceId}" - Valid UUID: ${isValidUUID(sourceId)}`);
+          if (isValidUUID(sourceId)) {
+            allSourceIds.add(sourceId);
+          }
+        }
+      });
+
+      // 5. From jsonMappingConfig
+      const jmc = config.outputSchema?.metadata?.jsonMappingConfig;
+      console.log('5. jsonMappingConfig:', jmc);
+      if (jmc?.sourceSelection?.sources) {
+        jmc.sourceSelection.sources.forEach((source: any) => {
+          if (source.id) {
+            console.log(`  - Checking jsonMapping source: "${source.id}" - Valid UUID: ${isValidUUID(source.id)}`);
+            if (isValidUUID(source.id)) {
+              allSourceIds.add(source.id);
+            }
+          }
+        });
+      }
+
+      console.log('=== FINAL COLLECTED IDS ===');
+      const finalSourceIds = Array.from(allSourceIds);
+      console.log('Valid UUIDs collected:', finalSourceIds);
+      console.log('Total count:', finalSourceIds.length);
+
+      if (finalSourceIds.length === 0) {
+        throw new Error('No valid data source UUIDs found. The data sources may not have been created properly.');
+      }
+
+      const dataSourceIdArray = Array.from(allSourceIds);
+      console.log('🚀 Deploying with data source IDs:', dataSourceIdArray);
+      console.log(`📊 Total unique data sources: ${allSourceIds.size}`);
+      if (dataSourceIdArray.length === 0) {
+        throw new Error('No valid data sources found. Please ensure at least one data source is properly configured.');
+      }
+
       // Ensure outputSchema includes all the RSS configuration
       const schemaConfig = {
         type: 'custom',
@@ -490,12 +573,39 @@ export const APIWizard: React.FC<APIWizardProps> = ({
           // For non-RSS endpoints that aren't auto-drafts, update data sources normally
           // (Auto-drafts don't have data sources yet)
           
-          // Your existing data source update logic here...
+          // First, delete existing source links
+          await supabase
+            .from('api_endpoint_sources')
+            .delete()
+            .eq('endpoint_id', endpointToUpdate.id);
+
+          // Then add the new/updated source links
+          if (dataSourceIdArray.length > 0) {
+            const sourceRelations = dataSourceIdArray.map((sourceId, index) => ({
+              endpoint_id: endpointToUpdate.id,
+              data_source_id: sourceId,
+              is_primary: index === 0,
+              sort_order: index
+            }));
+            
+            await supabase
+              .from('api_endpoint_sources')
+              .insert(sourceRelations);
+          }
         }
         
         // If this was an auto-draft, now link the data sources
         if (endpointToUpdate.isAutoDraft) {
-          const createdDataSourceIds: string[] = [];
+          // Ensure we have ALL data source IDs, including ones created earlier
+          const allSourceIds = new Set<string>();
+          
+          // Add from selectedDataSources
+          selectedDataSources.forEach(id => allSourceIds.add(id));
+          
+          // Add from newDataSources that already have IDs
+          newDataSources.forEach(ds => {
+            if (ds.id) allSourceIds.add(ds.id);
+          });
           
           // Create new data sources
           for (const newDs of newDataSources) {
@@ -508,7 +618,7 @@ export const APIWizard: React.FC<APIWizardProps> = ({
                 .single();
               
               if (existing) {
-                createdDataSourceIds.push(existing.id);
+                allSourceIds.add(existing.id);
               } else {
                 const { data: createdDs, error } = await supabase
                   .from('data_sources')
@@ -527,20 +637,19 @@ export const APIWizard: React.FC<APIWizardProps> = ({
                 
                 if (error) throw error;
                 if (createdDs) {
-                  createdDataSourceIds.push(createdDs.id);
+                  allSourceIds.add(createdDs.id);
                   newDs.id = createdDs.id;
                 }
               }
             } else if (newDs.id) {
-              createdDataSourceIds.push(newDs.id);
+              allSourceIds.add(newDs.id);
             }
           }
 
-          const allDataSourceIds = [...selectedDataSources, ...createdDataSourceIds];
-          
-          if (allDataSourceIds.length > 0) {
-            const sourceRelations = allDataSourceIds.map((sourceId, index) => ({
-              endpoint_id: data.id,
+          const finalSourceIds = Array.from(allSourceIds);
+          if (finalSourceIds.length > 0) {
+            const sourceRelations = dataSourceIdArray.map((sourceId, index) => ({
+              endpoint_id: endpointToUpdate.id,
               data_source_id: sourceId,
               is_primary: index === 0,
               sort_order: index
@@ -563,118 +672,220 @@ export const APIWizard: React.FC<APIWizardProps> = ({
         onClose();
       } else {
         // Create brand new endpoint (no auto-draft exists)
-        const createdDataSourceIds: string[] = [];
+        console.log('📝 Starting new endpoint creation');
+        console.log('Selected data sources:', selectedDataSources);
+        console.log('New data sources:', newDataSources);
         
-        // Your existing data source creation logic...
+        const allSourceIds = new Set<string>();
+        
+        // Add all selected existing data sources
+        selectedDataSources.forEach(id => {
+          if (isValidUUID(id)) {
+            console.log('Adding selected source ID:', id);
+            allSourceIds.add(id);
+          }
+        });
+        
+        // Process new data sources
         for (const newDs of newDataSources) {
-          if (newDs.name && newDs.type && !newDs.id) {
-            const { data: existing } = await supabase
-              .from('data_sources')
-              .select('id')
-              .eq('name', newDs.name)
-              .eq('user_id', user.id)
-              .single();
-            
-            if (existing) {
-              createdDataSourceIds.push(existing.id);
-              console.log(`Using existing data source: ${newDs.name}`);
+          console.log('Processing new data source:', newDs);
+          
+          if (newDs.name && newDs.type) {
+            if (newDs.id) {
+              // Already has an ID, just add it
+              console.log('Data source already has ID:', newDs.id);
+              allSourceIds.add(newDs.id);
             } else {
-              const { data: createdDs, error } = await supabase
+              // Need to create it
+              console.log('Creating new data source:', newDs.name);
+              
+              const { data: existing } = await supabase
                 .from('data_sources')
-                .insert({
+                .select('id')
+                .eq('name', newDs.name)
+                .eq('user_id', user.id)
+                .single();
+              
+              if (existing) {
+                console.log('Found existing data source with ID:', existing.id);
+                allSourceIds.add(existing.id);
+              } else {
+                const dataSourcePayload = {
                   name: newDs.name,
                   type: newDs.type,
                   category: newDs.category,
                   active: true,
-                  api_config: newDs.api_config,
-                  database_config: newDs.database_config,
-                  file_config: newDs.file_config,
+                  api_config: newDs.api_config || null,
+                  database_config: newDs.database_config || null,
+                  file_config: newDs.file_config || null,
+                  rss_config: newDs.rss_config || null,
                   user_id: user.id
-                })
-                .select()
-                .single();
-              
-              if (error) throw error;
-              if (createdDs) {
-                createdDataSourceIds.push(createdDs.id);
-                newDs.id = createdDs.id;
+                };
+                
+                console.log('Creating data source with payload:', dataSourcePayload);
+                
+                const { data: createdDs, error } = await supabase
+                  .from('data_sources')
+                  .insert(dataSourcePayload)
+                  .select()
+                  .single();
+                
+                if (error) {
+                  console.error('Error creating data source:', error);
+                  throw error;
+                }
+                
+                if (createdDs) {
+                  console.log('Created data source with ID:', createdDs.id);
+                  allSourceIds.add(createdDs.id);
+                  newDs.id = createdDs.id;
+                }
               }
             }
-          } else if (newDs.id) {
-            createdDataSourceIds.push(newDs.id);
           }
         }
-
-        const allDataSourceIds = [...selectedDataSources, ...createdDataSourceIds];
         
+        // Also check field mappings for source IDs
+        if (config.fieldMappings && config.fieldMappings.length > 0) {
+          console.log('Checking field mappings for source IDs:', config.fieldMappings);
+          config.fieldMappings.forEach(mapping => {
+            const sourceId = mapping.source_id || mapping.sourceId;
+            if (sourceId) {
+              console.log('Found source ID in field mapping:', sourceId);
+              allSourceIds.add(sourceId);
+            }
+          });
+        }
+        
+        // Check jsonMappingConfig for source IDs
+        const jmc = config.outputSchema?.metadata?.jsonMappingConfig;
+        if (jmc?.sourceSelection?.sources) {
+          console.log('Checking jsonMappingConfig sources:', jmc.sourceSelection.sources);
+          jmc.sourceSelection.sources.forEach((source: any) => {
+            if (source.id) {
+              console.log('Found source ID in jsonMappingConfig:', source.id);
+              allSourceIds.add(source.id);
+            }
+          });
+        }
+        
+        const finalSourceIds = Array.from(allSourceIds);
+        console.log('🎯 FINAL source IDs to link:', finalSourceIds);
+        console.log('Total source IDs:', finalSourceIds.length);
+      
+        // Create the endpoint
+        const endpointPayload = {
+          name: config.name,
+          slug: config.slug,
+          description: config.description,
+          output_format: config.outputFormat,
+          schema_config: schemaConfig,
+          transform_config: {
+            transformations: config.transformations
+          },
+          relationship_config: {
+            relationships: config.relationships
+          },
+          auth_config: config.authentication,
+          cache_config: config.caching,
+          rate_limit_config: config.rateLimiting,
+          sample_data: sampleData,
+          active: true,
+          is_draft: false,
+          user_id: user.id
+        };
+        
+        console.log('Creating endpoint with payload:', endpointPayload);
+      
         const { data, error } = await supabase
           .from('api_endpoints')
-          .insert({
-            name: config.name,
-            slug: config.slug,
-            description: config.description,
-            output_format: config.outputFormat,
-            schema_config: schemaConfig,
-            transform_config: {
-              transformations: config.transformations
-            },
-            relationship_config: {
-              relationships: config.relationships
-            },
-            auth_config: config.authentication,
-            cache_config: config.caching,
-            rate_limit_config: config.rateLimiting,
-            sample_data: sampleData,
-            active: true,
-            is_draft: false,
-            user_id: user.id
-          })
+          .insert(endpointPayload)
           .select()
           .single();
-
-        if (error) throw error;
-
+      
+        if (error) {
+          console.error('Error creating endpoint:', error);
+          throw error;
+        }
+      
+        console.log('✅ Endpoint created with ID:', data.id);
+      
         // Link data sources
-        if (data && allDataSourceIds.length > 0) {
-          const sourceRelations = allDataSourceIds.map((sourceId, index) => ({
-            endpoint_id: data.id,
-            data_source_id: sourceId,
-            is_primary: index === 0,
-            sort_order: index
-          }));
-
-          await supabase
+        if (data && finalSourceIds.length > 0) {
+          console.log(`🔗 Linking ${finalSourceIds.length} data sources to endpoint ${data.id}`);
+          
+          const sourceRelations = finalSourceIds.map((sourceId, index) => {
+            const relation = {
+              endpoint_id: data.id,
+              data_source_id: sourceId,
+              is_primary: index === 0,
+              sort_order: index
+            };
+            console.log(`Creating relation ${index + 1}:`, relation);
+            return relation;
+          });
+      
+          console.log('Inserting source relations:', sourceRelations);
+          
+          const { data: linkData, error: linkError } = await supabase
             .from('api_endpoint_sources')
-            .insert(sourceRelations);
-
+            .insert(sourceRelations)
+            .select();
+          
+          if (linkError) {
+            console.error('❌ Failed to link data sources:', linkError);
+            console.error('Error details:', JSON.stringify(linkError, null, 2));
+            throw linkError; // Throw the error so the transaction can be handled properly
+          } else {
+            console.log('✅ Successfully linked data sources:', linkData);
+          }
+          
           // Handle RSS multi-source special case
           if (config.outputFormat === 'rss' && config.outputSchema?.metadata?.sourceMappings) {
+            console.log('🔄 Processing RSS multi-source configuration');
             const sourceMappings = config.outputSchema.metadata.sourceMappings;
             const enabledRssSources = sourceMappings.filter(m => m.enabled);
             
             const rssSourceIds = enabledRssSources.map(s => s.sourceId);
-            const additionalSources = rssSourceIds.filter(id => !allDataSourceIds.includes(id));
+            const additionalSources = rssSourceIds.filter(id => !finalSourceIds.includes(id));
+            
+            console.log('RSS enabled sources:', rssSourceIds);
+            console.log('Additional RSS sources to link:', additionalSources);
             
             if (additionalSources.length > 0) {
               const additionalRelations = additionalSources.map((sourceId, index) => ({
                 endpoint_id: data.id,
                 data_source_id: sourceId,
                 is_primary: false,
-                sort_order: allDataSourceIds.length + index
+                sort_order: finalSourceIds.length + index
               }));
               
-              await supabase
+              console.log('Inserting additional RSS source relations:', additionalRelations);
+              
+              const { data: rssLinkData, error: rssLinkError } = await supabase
                 .from('api_endpoint_sources')
-                .insert(additionalRelations);
+                .insert(additionalRelations)
+                .select();
+              
+              if (rssLinkError) {
+                console.error('Failed to link additional RSS sources:', rssLinkError);
+                throw rssLinkError;
+              } else {
+                console.log('✅ Successfully linked additional RSS sources:', rssLinkData);
+              }
             }
           }
+        } else {
+          console.warn('⚠️ No data sources to link!');
+          console.log('endpointData exists:', !!data);
+          console.log('finalSourceIds:', finalSourceIds);
         }
-
+      
         toaster.show({ 
           message: 'Agent created successfully', 
           intent: Intent.SUCCESS 
         });
-
+      
         onComplete(data);
         onClose();
       }
@@ -816,10 +1027,12 @@ export const APIWizard: React.FC<APIWizardProps> = ({
 
   const handleApplyAIConfig = async (aiConfig: Partial<APIEndpointConfig>) => {
     console.log('🎯 Applying AI configuration:', aiConfig);
-    console.log('📋 Full aiConfig object:', JSON.stringify(aiConfig, null, 2));
     
+    // Track ALL data source IDs that need to be linked to the endpoint
+    const dataSourceIdsToLink: string[] = [];
+    const idMapping: Record<string, string> = {};
+
     try {
-      // Get current user
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         toaster.show({
@@ -829,258 +1042,174 @@ export const APIWizard: React.FC<APIWizardProps> = ({
         return;
       }
   
-      // Handle data sources - check for both plural and singular forms
+      // Handle data sources
       let dataSourcesToProcess = aiConfig.dataSources;
       
-      // Fallback: If AI used "dataSource" instead of "dataSources"
-      if (!dataSourcesToProcess && aiConfig.dataSource) {
-        console.log('⚠️ AI used "dataSource" instead of "dataSources", converting...');
-        
-        // Convert single dataSource to dataSources array format
-        const ds = aiConfig.dataSource as any;
-        dataSourcesToProcess = [{
-          id: `${ds.type}_${Date.now()}`,
-          name: aiConfig.name || 'New API Source',
-          type: ds.type || 'api',
-          isNew: true,
-          api_config: {
-            url: ds.url,
-            method: ds.method || 'GET',
-            headers: ds.headers || {},
-            data_path: ds.data_path || ''
-          }
-        }];
-        
-        // Add it to the aiConfig for processing
-        aiConfig.dataSources = dataSourcesToProcess;
-        delete aiConfig.dataSource; // Remove the singular form
-      }
-      
       if (dataSourcesToProcess && Array.isArray(dataSourcesToProcess)) {
-        console.log('📦 Raw dataSources from AI:', dataSourcesToProcess);
-        console.log('📦 DataSources count:', dataSourcesToProcess.length);
+        console.log('📦 Processing data sources from AI:', dataSourcesToProcess);
         
-        // Log each data source details
-        dataSourcesToProcess.forEach((ds, index) => {
-          console.log(`DataSource ${index}:`, {
-            id: ds.id,
-            name: ds.name,
-            type: ds.type,
-            isNew: ds.isNew,
-            hasApiConfig: !!ds.api_config,
-            apiConfigUrl: ds.api_config?.url
-          });
-        });
-        
-        // Try multiple ways to identify new sources
-        const aiNewSources1 = dataSourcesToProcess.filter(ds => ds.isNew === true);
-        console.log('🔍 Filter method 1 (isNew === true):', aiNewSources1);
-        
-        const aiNewSources2 = dataSourcesToProcess.filter(ds => ds.isNew);
-        console.log('🔍 Filter method 2 (isNew):', aiNewSources2);
-        
-        const aiNewSources3 = dataSourcesToProcess.filter(ds => !ds.id || ds.isNew);
-        console.log('🔍 Filter method 3 (!id || isNew):', aiNewSources3);
-        
-        // Use the most inclusive filter
-        const aiNewSources = dataSourcesToProcess.filter(ds => {
-          // Consider it new if:
-          // 1. It has isNew flag set to true
-          // 2. It doesn't have an ID (or has a temporary ID)
-          // 3. It has an API config with a URL (indicating it's a new API source)
-          const shouldCreateNew = ds.isNew === true || 
-                                (!ds.id || ds.id.startsWith('temp_') || ds.id.startsWith('new_')) ||
-                                (ds.type === 'api' && ds.api_config?.url && !ds.id);
+        for (const dataSource of dataSourcesToProcess) {
+          const tempId = dataSource.id;
+          let finalId: string | null = null;
           
-          console.log(`Checking ${ds.name}: isNew=${ds.isNew}, id=${ds.id}, shouldCreate=${shouldCreateNew}`);
-          return shouldCreateNew;
-        });
-        
-        console.log('🆕 Final new data sources to create:', aiNewSources);
-        console.log('🆕 New sources count:', aiNewSources.length);
-        
-        if (aiNewSources.length > 0) {
-          const createdSourceIds: string[] = [];
-          
-          // Save each new data source to the database
-          for (const newSource of aiNewSources) {
-            try {
-              console.log(`💾 Processing data source: ${newSource.name}`);
-              
-              // Check if a data source with this name already exists
-              const { data: existing } = await supabase
+          // Check if this is a new data source that needs creation
+          if (dataSource.isNew || !dataSource.id || !isValidUUID(dataSource.id) || 
+              dataSource.id.includes('temp') || dataSource.id.includes('new')) {
+            
+            console.log(`💾 Creating new data source: ${dataSource.name}`);
+            
+            // Check if exists
+            const { data: existing } = await supabase
+              .from('data_sources')
+              .select('id')
+              .eq('name', dataSource.name)
+              .eq('user_id', user.id)
+              .single();
+            
+            if (existing) {
+              finalId = existing.id;
+              console.log(`✅ Using existing data source: ${dataSource.name} (ID: ${finalId})`);
+            } else {
+              // Create new
+              const { data: created, error } = await supabase
                 .from('data_sources')
-                .select('id')
-                .eq('name', newSource.name)
-                .eq('user_id', user.id)
-                .single();
-              
-              if (existing) {
-                console.log(`✅ Using existing data source: ${newSource.name} (ID: ${existing.id})`);
-                createdSourceIds.push(existing.id);
-                newSource.id = existing.id;
-              } else {
-                // Prepare the data source for insertion
-                const dataSourceToInsert = {
-                  name: newSource.name,
-                  type: newSource.type || 'api',
-                  category: newSource.category || 'api',
+                .insert({
+                  name: dataSource.name,
+                  type: dataSource.type || 'api',
+                  category: dataSource.category || 'api',
                   active: true,
                   user_id: user.id,
-                  // Include config based on type
-                  ...(newSource.type === 'api' && newSource.api_config ? 
-                    { api_config: newSource.api_config } : {}),
-                  ...(newSource.type === 'database' && newSource.database_config ? 
-                    { database_config: newSource.database_config } : {}),
-                  ...(newSource.type === 'file' && newSource.file_config ? 
-                    { file_config: newSource.file_config } : {})
-                };
-                
-                console.log(`💾 Creating new data source with data:`, dataSourceToInsert);
-                
-                const { data: createdDs, error } = await supabase
-                  .from('data_sources')
-                  .insert(dataSourceToInsert)
-                  .select()
-                  .single();
-                
-                if (error) {
-                  console.error('❌ Failed to create data source:', error);
-                  toaster.show({
-                    message: `Failed to create data source: ${newSource.name}`,
-                    intent: Intent.DANGER
-                  });
-                  continue;
-                }
-                
-                if (createdDs) {
-                  console.log(`✅ Created data source with ID: ${createdDs.id}`, createdDs);
-                  createdSourceIds.push(createdDs.id);
-                  newSource.id = createdDs.id;
-                  
-                  // Add to existing data sources for immediate use
-                  setExistingDataSources(prev => {
-                    console.log('Previous existing sources:', prev.length);
-                    const updated = [...prev, createdDs];
-                    console.log('Updated existing sources:', updated.length);
-                    return updated;
-                  });
-                }
+                  ...(dataSource.api_config ? { api_config: dataSource.api_config } : {}),
+                  ...(dataSource.database_config ? { database_config: dataSource.database_config } : {}),
+                  ...(dataSource.file_config ? { file_config: dataSource.file_config } : {})
+                })
+                .select()
+                .single();
+              
+              if (error) throw error;
+              if (created) {
+                finalId = created.id;
+                console.log(`✅ Created data source: ${dataSource.name} (ID: ${finalId})`);
               }
-            } catch (error) {
-              console.error('❌ Error creating data source:', error);
-              toaster.show({
-                message: `Error creating data source: ${newSource.name}`,
-                intent: Intent.DANGER
+            }
+            
+            if (finalId) {
+              // Track the ID mapping
+              if (tempId) {
+                idMapping[tempId] = finalId;
+              }
+              
+              // Add to the list of IDs to link
+              dataSourceIdsToLink.push(finalId);
+              
+              // Update the data source object
+              dataSource.id = finalId;
+              
+              // Add to newDataSources array for UI tracking
+              setNewDataSources(prev => {
+                const exists = prev.some(ds => ds.id === finalId);
+                if (!exists) {
+                  return [...prev, dataSource];
+                }
+                return prev;
               });
             }
-          }
-          
-          // Update selected data sources with the created IDs (keep as array)
-          if (createdSourceIds.length > 0) {
-            console.log('📝 Updating selected sources with IDs:', createdSourceIds);
-            
-            setSelectedDataSources(prev => {
-              // Combine previous array with new IDs and remove duplicates
-              const combined = [...prev, ...createdSourceIds];
-              const unique = [...new Set(combined)];
-              console.log('Selected sources updated:', unique);
-              return unique;
-            });
-            
-            toaster.show({
-              message: `Created ${createdSourceIds.length} data source(s) successfully!`,
-              intent: Intent.SUCCESS,
-              icon: 'database'
-            });
-          }
-        } else {
-          console.log('⚠️ No new data sources to create, but dataSources array exists');
-          
-          // If we have data sources but none are marked as new,
-          // they might be references to existing sources
-          if (aiConfig.dataSources.length > 0) {
-            console.log('🔄 Processing as existing source references');
-            
-            const sourceIds = aiConfig.dataSources
-              .map(ds => ds.id)
-              .filter(id => id && !id.startsWith('temp_'));
-            
-            if (sourceIds.length > 0) {
-              setSelectedDataSources(prev => {
-                // Combine arrays and remove duplicates
-                const combined = [...prev, ...sourceIds];
-                const unique = [...new Set(combined)];
-                return unique;
-              });
-              console.log('✅ Selected existing sources:', sourceIds);
-            }
+          } else {
+            // Existing data source, just track its ID
+            console.log(`📌 Using existing data source ID: ${dataSource.id}`);
+            dataSourceIdsToLink.push(dataSource.id);
           }
         }
-      } else {
-        console.log('⚠️ No dataSources in aiConfig');
       }
       
-      // Now update the main config
-      setConfig(prevConfig => {
-        const merged = { ...prevConfig };
-        
-        // Apply all configuration updates
-        Object.entries(aiConfig).forEach(([key, value]) => {
-          console.log(`Merging config key: ${key}`, value);
-          
-          if (key === 'dataSources' && Array.isArray(value)) {
-            merged.dataSources = value;
-          } else if (key === 'transformations' && Array.isArray(value)) {
-            merged.transformations = value;
-          } else if (key === 'fieldMappings' && Array.isArray(value)) {
-            merged.fieldMappings = value;
-          } else if (key === 'outputSchema' && value) {
-            merged.outputSchema = {
-              ...(prevConfig.outputSchema || {}),
-              ...value,
-              metadata: {
-                ...(prevConfig.outputSchema?.metadata || {}),
-                ...(value.metadata || {})
-              }
-            };
-          } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-            merged[key] = { ...(prevConfig[key] || {}), ...value };
-          } else {
-            merged[key] = value;
+      // CRITICAL: Also extract data source IDs from field mappings if they exist
+      // This handles cases where the data source was created but not properly tracked
+      if (aiConfig.fieldMappings && aiConfig.fieldMappings.length > 0) {
+        aiConfig.fieldMappings.forEach(mapping => {
+          const sourceId = mapping.source_id || mapping.sourceId;
+          if (sourceId && !dataSourceIdsToLink.includes(sourceId)) {
+            console.log(`📎 Found data source ID in field mappings: ${sourceId}`);
+            dataSourceIdsToLink.push(sourceId);
           }
         });
+      }
+      
+      // Also check jsonMappingConfig for source IDs
+      if (aiConfig.outputSchema?.metadata?.jsonMappingConfig?.sourceSelection?.sources) {
+        aiConfig.outputSchema.metadata.jsonMappingConfig.sourceSelection.sources.forEach((source: any) => {
+          if (source.id && !dataSourceIdsToLink.includes(source.id)) {
+            console.log(`📎 Found data source ID in sourceSelection: ${source.id}`);
+            dataSourceIdsToLink.push(source.id);
+          }
+        });
+      }
+      
+      // Update field mappings with new IDs if needed
+      if (Object.keys(idMapping).length > 0) {
+        console.log('🔄 Updating field mappings with ID mapping:', idMapping);
         
-        console.log('✨ Final merged configuration:', merged);
-        return merged;
-      });
-      
-      // Navigation logic
-      let targetStep = currentStepId;
-      let message = 'Configuration applied successfully!';
-      
-      if (aiConfig.fieldMappings || aiConfig.outputSchema) {
-        targetStep = 'schema';
-        message = 'Field mappings configured!';
-      } else if (aiConfig.transformations) {
-        targetStep = 'transformation';
-        message = 'Transformations configured!';
+        if (aiConfig.fieldMappings) {
+          aiConfig.fieldMappings = aiConfig.fieldMappings.map(mapping => {
+            const oldId = mapping.source_id || mapping.sourceId;
+            const newId = idMapping[oldId] || oldId;
+            return {
+              ...mapping,
+              source_id: newId,
+              sourceId: newId
+            };
+          });
+        }
+        
+        // Update jsonMappingConfig
+        if (aiConfig.outputSchema?.metadata?.jsonMappingConfig) {
+          const jmc = aiConfig.outputSchema.metadata.jsonMappingConfig;
+          
+          if (jmc.fieldMappings) {
+            jmc.fieldMappings = jmc.fieldMappings.map((mapping: any) => ({
+              ...mapping,
+              sourceId: idMapping[mapping.sourceId] || mapping.sourceId,
+              source_id: idMapping[mapping.source_id] || mapping.source_id
+            }));
+          }
+          
+          if (jmc.sourceSelection?.sources) {
+            jmc.sourceSelection.sources = jmc.sourceSelection.sources.map((source: any) => ({
+              ...source,
+              id: idMapping[source.id] || source.id
+            }));
+          }
+        }
       }
       
+      // CRITICAL FIX: Update the selectedDataSources state with ALL collected IDs
+      console.log('🔗 Data source IDs to link to endpoint:', dataSourceIdsToLink);
+      setSelectedDataSources(prev => {
+        const combined = [...new Set([...prev, ...dataSourceIdsToLink])];
+        console.log('📋 Updated selectedDataSources:', combined);
+        return combined;
+      });
+      
+      // Apply the rest of the configuration
+      if (aiConfig.name) updateConfig({ name: aiConfig.name });
+      if (aiConfig.slug) updateConfig({ slug: aiConfig.slug });
+      if (aiConfig.description) updateConfig({ description: aiConfig.description });
+      if (aiConfig.outputFormat) updateConfig({ outputFormat: aiConfig.outputFormat });
+      if (aiConfig.fieldMappings) updateConfig({ fieldMappings: aiConfig.fieldMappings });
+      if (aiConfig.outputSchema) updateConfig({ outputSchema: aiConfig.outputSchema });
+      if (aiConfig.outputWrapper) updateConfig({ outputWrapper: aiConfig.outputWrapper });
+      if (aiConfig.transformations) updateConfig({ transformations: aiConfig.transformations });
+      if (aiConfig.authentication) updateConfig({ authentication: aiConfig.authentication });
+      if (aiConfig.caching) updateConfig({ caching: aiConfig.caching });
+      if (aiConfig.rateLimiting) updateConfig({ rateLimiting: aiConfig.rateLimiting });
+      
+      console.log('✅ AI configuration applied successfully');
       toaster.show({
-        message,
-        intent: Intent.SUCCESS,
-        icon: 'tick-circle'
+        message: 'Configuration applied successfully',
+        intent: Intent.SUCCESS
       });
-      
-      if (targetStep !== currentStepId) {
-        setCurrentStepId(targetStep);
-      }
-      
-      setShowAIAssistant(false);
       
     } catch (error) {
-      console.error('❌ Error applying AI configuration:', error);
+      console.error('Failed to apply AI configuration:', error);
       toaster.show({
         message: 'Failed to apply configuration',
         intent: Intent.DANGER
