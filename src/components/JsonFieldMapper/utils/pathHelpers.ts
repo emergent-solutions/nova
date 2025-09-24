@@ -98,30 +98,102 @@ export function extractFieldPaths(
 export function getValueFromPath(data: any, path: string): any {
   if (!path) return data;
   
-  const parts = path.split('.');
+  // Split the path into segments, handling both dot notation and array notation
+  // e.g., "competitions[0].competitors[1].team.displayName"
+  // becomes ["competitions", "0", "competitors", "1", "team", "displayName"]
+  const segments = path.split(/[\.\[\]]+/).filter(Boolean);
+  
   let current = data;
   
-  for (const part of parts) {
-    if (current === null || current === undefined) return undefined;
-    current = current[part];
+  for (const segment of segments) {
+    if (current === null || current === undefined) {
+      return undefined;
+    }
+    
+    // Check if segment is a number (array index)
+    if (/^\d+$/.test(segment)) {
+      const index = parseInt(segment, 10);
+      if (Array.isArray(current)) {
+        current = current[index];
+      } else {
+        return undefined; // Trying to index into non-array
+      }
+    } 
+    // Handle wildcard [*] - return first item for preview
+    else if (segment === '*') {
+      if (Array.isArray(current) && current.length > 0) {
+        current = current[0]; // For preview, just use first item
+      } else {
+        return undefined;
+      }
+    }
+    // Regular property access
+    else {
+      if (typeof current === 'object' && current !== null) {
+        current = current[segment];
+      } else {
+        return undefined;
+      }
+    }
   }
   
   return current;
 }
 
 export function setValueAtPath(data: any, path: string, value: any): any {
-  const parts = path.split('.');
-  const result = JSON.parse(JSON.stringify(data)); // Deep clone
+  if (!path) return value;
+  
+  const segments = path.split(/[\.\[\]]+/).filter(Boolean);
+  const result = data ? JSON.parse(JSON.stringify(data)) : {}; // Deep clone or create new object
   
   let current = result;
-  for (let i = 0; i < parts.length - 1; i++) {
-    const part = parts[i];
-    if (!current[part]) {
-      current[part] = {};
+  
+  for (let i = 0; i < segments.length - 1; i++) {
+    const segment = segments[i];
+    const nextSegment = segments[i + 1];
+    
+    // Check if segment is a number (array index)
+    if (/^\d+$/.test(segment)) {
+      const index = parseInt(segment, 10);
+      
+      // Ensure current is an array
+      if (!Array.isArray(current)) {
+        console.warn(`Expected array at path segment ${segment}, got ${typeof current}`);
+        return result;
+      }
+      
+      // Ensure array has this index
+      while (current.length <= index) {
+        current.push(null);
+      }
+      
+      // Create next level if needed
+      if (current[index] === null || current[index] === undefined) {
+        // Check if next segment is numeric (indicates next level should be array)
+        current[index] = /^\d+$/.test(nextSegment) ? [] : {};
+      }
+      
+      current = current[index];
+    } else {
+      // Regular property access
+      if (!current[segment]) {
+        // Check if next segment is numeric (indicates next level should be array)
+        current[segment] = /^\d+$/.test(nextSegment) ? [] : {};
+      }
+      current = current[segment];
     }
-    current = current[part];
   }
   
-  current[parts[parts.length - 1]] = value;
+  // Set the final value
+  const lastSegment = segments[segments.length - 1];
+  if (/^\d+$/.test(lastSegment)) {
+    const index = parseInt(lastSegment, 10);
+    if (Array.isArray(current)) {
+      current[index] = value;
+    }
+  } else {
+    current[lastSegment] = value;
+  }
+  
   return result;
 }

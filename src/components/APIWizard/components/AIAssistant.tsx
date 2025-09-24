@@ -50,6 +50,172 @@ const EXAMPLE_PROMPTS = [
   { category: 'Relationship', text: 'Join users table with orders and embed results' }
 ];
 
+/**
+ * Detects if the user's prompt contains an output structure that requires wrapping
+ * and extracts the wrapper key if present
+ */
+function detectOutputWrapper(prompt: string): {
+  needsWrapper: boolean;
+  wrapperKey: string | undefined;
+  confidence: 'high' | 'medium' | 'low';
+} {
+  // Check for explicit JSON examples with wrapper keys
+  const jsonPatterns = [
+    // Match {"data": [...]} or {"data": {...}}
+    /\{\s*["'](\w+)["']\s*:\s*[\[\{]/g,
+    // Match { data: [...] } (without quotes)
+    /\{\s*(\w+)\s*:\s*[\[\{]/g,
+    // Match multi-line formatted JSON
+    /\{\s*\n\s*["'](\w+)["']\s*:\s*[\[\{]/g,
+  ];
+
+  for (const pattern of jsonPatterns) {
+    const matches = prompt.matchAll(pattern);
+    for (const match of matches) {
+      const key = match[1];
+      // Common wrapper keys that indicate intentional wrapping
+      const commonWrappers = ['data', 'results', 'items', 'records', 'response', 'payload', 'content', 'output'];
+      
+      if (commonWrappers.includes(key.toLowerCase())) {
+        console.log(`🎯 High confidence wrapper detected: "${key}"`);
+        return {
+          needsWrapper: true,
+          wrapperKey: key,
+          confidence: 'high'
+        };
+      } else {
+        // Less common key, but still likely a wrapper
+        console.log(`🎯 Medium confidence wrapper detected: "${key}"`);
+        return {
+          needsWrapper: true,
+          wrapperKey: key,
+          confidence: 'medium'
+        };
+      }
+    }
+  }
+
+  // Check for verbal indicators
+  const verbalPatterns = [
+    /wrap(?:ped)?\s+in\s+(?:a\s+)?["']?(\w+)["']?\s+(?:field|key|property)/i,
+    /(?:root|top)\s+(?:element|key|field)\s+["']?(\w+)["']?/i,
+    /output\s+(?:should\s+)?(?:be\s+)?(?:wrapped|contained)\s+in\s+["']?(\w+)["']?/i,
+    /["']?(\w+)["']?\s+(?:field|key)\s+(?:containing|with)\s+(?:the\s+)?(?:array|data|results)/i,
+  ];
+
+  for (const pattern of verbalPatterns) {
+    const match = prompt.match(pattern);
+    if (match) {
+      const key = match[1];
+      console.log(`💬 Verbal wrapper indicator found: "${key}"`);
+      return {
+        needsWrapper: true,
+        wrapperKey: key,
+        confidence: 'medium'
+      };
+    }
+  }
+
+  // Check for general wrapper keywords without specific key
+  const generalWrapperKeywords = [
+    /wrap(?:ped)?\s+(?:the\s+)?(?:response|output|results?)/i,
+    /(?:with|include)\s+(?:a\s+)?(?:root|wrapper)\s+(?:element|object)/i,
+    /(?:container|wrapper)\s+(?:object|field)/i,
+  ];
+
+  for (const pattern of generalWrapperKeywords) {
+    if (pattern.test(prompt)) {
+      console.log(`💭 General wrapper keyword detected, defaulting to "data"`);
+      return {
+        needsWrapper: true,
+        wrapperKey: 'data', // Default wrapper key
+        confidence: 'low'
+      };
+    }
+  }
+
+  // Check for explicit flat array/object indicators
+  const flatIndicators = [
+    /^\s*\[/,  // Starts with array bracket
+    /return\s+(?:a\s+)?(?:flat|plain|simple)\s+array/i,
+    /(?:no|without)\s+(?:wrapper|container|root)/i,
+    /direct(?:ly)?\s+(?:as\s+)?(?:an?\s+)?array/i,
+  ];
+
+  for (const pattern of flatIndicators) {
+    if (pattern.test(prompt)) {
+      console.log(`📋 Flat output structure detected - no wrapper needed`);
+      return {
+        needsWrapper: false,
+        wrapperKey: undefined,
+        confidence: 'high'
+      };
+    }
+  }
+
+  // Default: no wrapper detected
+  return {
+    needsWrapper: false,
+    wrapperKey: undefined,
+    confidence: 'low'
+  };
+}
+
+/**
+ * Enhances the configuration with proper output wrapper settings
+ * This ensures consistency between all wrapper-related configurations
+ */
+function ensureWrapperConsistency(
+  config: Partial<APIEndpointConfig>,
+  wrapperKey?: string
+): Partial<APIEndpointConfig> {
+  // If field mappings exist and wrapper is needed
+  if (config.fieldMappings && config.fieldMappings.length > 0) {
+    const wrapperDetected = config.outputWrapper?.enabled || wrapperKey;
+    
+    if (wrapperDetected) {
+      const finalWrapperKey = wrapperKey || config.outputWrapper?.wrapperKey || 'data';
+      
+      // Ensure outputWrapper is properly configured
+      config.outputWrapper = {
+        enabled: true,
+        wrapperKey: finalWrapperKey,
+        includeMetadata: config.outputWrapper?.includeMetadata || false,
+        metadataFields: config.outputWrapper?.metadataFields || {
+          timestamp: false,
+          source: false,
+          count: false,
+          version: false
+        }
+      };
+
+      // Ensure outputSchema reflects the wrapper configuration
+      if (!config.outputSchema) {
+        config.outputSchema = {};
+      }
+      if (!config.outputSchema.metadata) {
+        config.outputSchema.metadata = {};
+      }
+      
+      config.outputSchema.metadata.wrapResponse = true;
+      config.outputSchema.metadata.rootElement = finalWrapperKey;
+      config.outputSchema.metadata.includeMetadata = config.outputWrapper.includeMetadata;
+      
+      // Sync with jsonMappingConfig
+      if (!config.outputSchema.metadata.jsonMappingConfig) {
+        config.outputSchema.metadata.jsonMappingConfig = {};
+      }
+      config.outputSchema.metadata.jsonMappingConfig.outputWrapper = {
+        ...config.outputWrapper
+      };
+
+      console.log(`✅ Wrapper consistency ensured with key: "${finalWrapperKey}"`);
+    }
+  }
+  
+  return config;
+}
+
 export const AIAssistant: React.FC<AIAssistantProps> = ({
   isOpen,
   onClose,
@@ -89,7 +255,7 @@ What would you like to configure?`,
   const generateConfiguration = async (prompt: string): Promise<Partial<APIEndpointConfig>> => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error('No authenticated session');
-
+  
     // Build context for Claude
     const context = {
       currentConfig: {
@@ -98,7 +264,9 @@ What would you like to configure?`,
         outputFormat: config.outputFormat,
         authentication: config.authentication,
         rateLimiting: config.rateLimiting,
-        caching: config.caching
+        caching: config.caching,
+        fieldMappings: config.fieldMappings,
+        outputWrapper: config.outputWrapper
       },
       availableDataSources: dataSources.map(ds => ({
         id: ds.id,
@@ -107,90 +275,185 @@ What would you like to configure?`,
         fields: ds.fields || []
       }))
     };
-
-    // System prompt for API configuration
+  
+    // IMPROVED System prompt with output wrapper detection
     const systemPrompt = `You are an API configuration assistant for APIWizard. 
-Generate valid JSON configurations based on user requests.
-
-IMPORTANT: Follow these EXACT schemas:
-
-1. For creating a new data source from a URL, you MUST use this format:
-{
-  "dataSources": [
-    {
-      "id": "unique_id_here",
-      "name": "Source Name",
-      "type": "api",
-      "isNew": true,
-      "api_config": {
-        "url": "https://example.com/api",
-        "method": "GET",
-        "headers": {},
-        "data_path": "path.to.data"
+  Generate valid JSON configurations based on user requests.
+  
+  CRITICAL OUTPUT WRAPPER DETECTION RULES:
+  1. If the user provides an example output with a root object containing a key like "data", "results", "items", "records", or any custom key that wraps an array or object, YOU MUST configure outputWrapper.
+  2. Look for patterns like:
+     - {"data": [...]} or {"data": {...}} → Set outputWrapper with wrapperKey: "data"
+     - {"results": [...]} → Set outputWrapper with wrapperKey: "results"
+     - {"items": [...]} → Set outputWrapper with wrapperKey: "items"
+     - {"{customKey}": [...]} → Set outputWrapper with wrapperKey: "{customKey}"
+  3. When outputWrapper is needed, ALWAYS include BOTH:
+     - Root level "outputWrapper" configuration
+     - Nested outputWrapper in fieldMappings' jsonMappingConfig
+  
+  IMPORTANT: Follow these EXACT schemas:
+  
+  1. For creating a new data source from a URL, you MUST use this format:
+  {
+    "dataSources": [
+      {
+        "id": "unique_id_here",
+        "name": "Source Name",
+        "type": "api",
+        "isNew": true,
+        "api_config": {
+          "url": "https://example.com/api",
+          "method": "GET",
+          "headers": {},
+          "data_path": "path.to.data"
+        }
+      }
+    ]
+  }
+  
+  2. For field mappings WITH OUTPUT WRAPPER (when user shows wrapped output):
+  {
+    "fieldMappings": [
+      {
+        "id": "map_1",
+        "targetPath": "field1",
+        "sourcePath": "source.path.to.field1",
+        "sourceId": "source_id"
+      }
+    ],
+    "outputWrapper": {
+      "enabled": true,
+      "wrapperKey": "data",
+      "includeMetadata": false,
+      "metadataFields": {
+        "timestamp": false,
+        "source": false,
+        "count": false,
+        "version": false
+      }
+    },
+    "outputSchema": {
+      "metadata": {
+        "wrapResponse": true,
+        "rootElement": "data",
+        "includeMetadata": false,
+        "jsonMappingConfig": {
+          "outputWrapper": {
+            "enabled": true,
+            "wrapperKey": "data",
+            "includeMetadata": false,
+            "metadataFields": {
+              "timestamp": false,
+              "source": false,
+              "count": false,
+              "version": false
+            }
+          }
+        }
       }
     }
-  ]
-}
-
-2. For field mappings, use this EXACT format:
-{
-  "fieldMappings": [
-    {
-      "id": "map_1",
-      "target_field": "homeTeam",
-      "source_field": "events[0].competitions[0].competitors[0].team.displayName"
-    },
-    {
-      "id": "map_2",
-      "target_field": "awayTeam",
-      "source_field": "events[0].competitions[0].competitors[1].team.displayName"
+  }
+  
+  3. For field mappings WITHOUT wrapper (flat array or object output):
+  {
+    "fieldMappings": [
+      {
+        "id": "map_1",
+        "targetPath": "field1",
+        "sourcePath": "source.path.to.field1"
+      }
+    ],
+    "outputWrapper": {
+      "enabled": false
     }
-  ]
-}
-
-3. Always use "dataSources" (plural) not "dataSource" (singular)
-4. Always include "isNew": true for new data sources
-5. Always include "api_config" for API type sources
-
-Available configuration keys:
-- dataSources (array) - for data sources
-- fieldMappings (array) - for field mappings
-- outputFormat (string) - json, xml, rss, csv, atom
-- authentication (object) - auth configuration
-- rateLimiting (object) - rate limit settings
-- transformations (array) - data transformations
-
-For ESPN MLB API specifically:
-- URL: https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard
-- Data path: "events"
-- Home team path: events[0].competitions[0].competitors[0].team.displayName
-- Away team path: events[0].competitions[0].competitors[1].team.displayName
-- Home score: events[0].competitions[0].competitors[0].score
-- Away score: events[0].competitions[0].competitors[1].score
-
-Current context: ${JSON.stringify(context)}
-
-Return ONLY valid JSON that can be merged into APIEndpointConfig.`;
-
-    // User prompt with their request
+  }
+  
+  WRAPPER DETECTION EXAMPLES:
+  - User shows: {"data": [{"name": "John"}]} → USE wrapper with key "data"
+  - User shows: {"results": [...]} → USE wrapper with key "results"
+  - User shows: [{"name": "John"}] → NO wrapper needed
+  - User shows: {"name": "John"} → NO wrapper needed
+  - User says "wrap in data field" → USE wrapper with key "data"
+  - User says "return as array" → NO wrapper needed
+  
+  Available configuration keys:
+  - dataSources (array) - for data sources
+  - fieldMappings (array) - for field mappings  
+  - outputWrapper (object) - for wrapping output in a container
+  - outputFormat (string) - json, xml, rss, csv, atom
+  - authentication (object) - auth configuration
+  - rateLimiting (object) - rate limit settings
+  - transformations (array) - data transformations
+  - outputSchema (object) - detailed output configuration
+  
+  ESPN MLB API specific mappings:
+  - URL: https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard
+  - Data path: "events"
+  - Home team: competitions[0].competitors[0].team.displayName
+  - Away team: competitions[0].competitors[1].team.displayName
+  - Home score: competitions[0].competitors[0].score
+  - Away score: competitions[0].competitors[1].score
+  - Inning: competitions[0].status.type.shortDetail
+  - Game state: competitions[0].status.type.state
+  - Period (inning number): competitions[0].status.period
+  
+  IMPORTANT: Field paths must be valid JavaScript notation. Never use operators like + or - in paths.
+  For ESPN MLB, the inning info is in status.type.shortDetail (e.g., "Top 5th", "Bot 9th", "Final")
+  
+  Current context: ${JSON.stringify(context)}
+  
+  ANALYZE THE USER'S REQUEST:
+  1. Check if they show an example output with a wrapper key
+  2. Look for keywords like "wrap", "container", "root element"
+  3. Detect the wrapper key name from their example
+  4. Set outputWrapper configuration accordingly
+  
+  Return ONLY valid JSON that can be merged into APIEndpointConfig.`;
+  
+    // Enhanced user prompt with wrapper detection hint
     const userPrompt = `User request: "${prompt}"
-
-Generate the configuration changes needed to fulfill this request.`;
-
+  
+  IMPORTANT: 
+  - If the user shows an example output like {"data": [...]}, configure outputWrapper with wrapperKey: "data"
+  - If the user wants a flat array [...] or object {...}, set outputWrapper.enabled: false
+  - Analyze their desired output structure carefully
+  
+  Generate the configuration changes needed to fulfill this request.`;
+  
     // Debug logging
     console.log('🤖 AI Assistant - Generating configuration');
     console.log('📝 User request:', prompt);
+    console.log('🔍 Checking for wrapper pattern in request...');
+    
+    // Quick pattern detection for logging
+    const wrapperPatterns = [
+      /\{\s*["'](\w+)["']\s*:\s*\[/,  // {"key": [
+      /\{\s*["'](\w+)["']\s*:\s*\{/,  // {"key": {
+      /"(\w+)":\s*\[.*\]/,            // "key": [...]
+    ];
+    
+    let detectedWrapper = null;
+    for (const pattern of wrapperPatterns) {
+      const match = prompt.match(pattern);
+      if (match) {
+        detectedWrapper = match[1];
+        console.log(`✅ Detected wrapper key: "${detectedWrapper}"`);
+        break;
+      }
+    }
+    
+    if (!detectedWrapper && prompt.toLowerCase().includes('wrap')) {
+      console.log('⚠️ User mentioned "wrap" but no explicit key detected');
+    }
+  
     console.log('🔧 Current config:', {
       name: config.name,
       outputFormat: config.outputFormat,
-      dataSources: config.dataSources?.length || 0
+      dataSources: config.dataSources?.length || 0,
+      hasOutputWrapper: !!config.outputWrapper?.enabled,
+      currentWrapperKey: config.outputWrapper?.wrapperKey
     });
-    console.log('📤 Calling claude with:', {
-      promptLength: userPrompt.length,
-      systemPromptLength: systemPrompt.length,
-      outputFormat: 'json'
-    });
-
+  
     // Call claude with the improved parameters
     const response = await supabase.functions.invoke('claude', {
       body: {
@@ -202,18 +465,18 @@ Generate the configuration changes needed to fulfill this request.`;
         Authorization: `Bearer ${session?.access_token}`
       }
     });
-
+  
     console.log('📥 Claude response received:', {
       error: response.error,
       hasData: !!response.data,
       dataType: typeof response.data?.response
     });
-
+  
     if (response.error) {
       console.error('❌ Claude API error:', response.error);
       throw new Error(response.error.message || 'Failed to generate configuration');
     }
-
+  
     // Parse response
     let result = response.data.response;
     console.log('🔍 Raw response (first 500 chars):', 
@@ -254,13 +517,55 @@ Generate the configuration changes needed to fulfill this request.`;
         }
       }
     }
-
+  
+    // Post-process to ensure outputWrapper consistency
+    if (result.fieldMappings && result.fieldMappings.length > 0) {
+      console.log('🔧 Post-processing field mappings configuration...');
+      
+      // Check if outputWrapper should be enabled based on the result
+      if (result.outputWrapper?.enabled) {
+        console.log(`✅ Output wrapper enabled with key: "${result.outputWrapper.wrapperKey}"`);
+        
+        // Ensure outputSchema is properly configured
+        if (!result.outputSchema) {
+          result.outputSchema = {};
+        }
+        if (!result.outputSchema.metadata) {
+          result.outputSchema.metadata = {};
+        }
+        
+        // Set consistent wrapper configuration
+        result.outputSchema.metadata.wrapResponse = true;
+        result.outputSchema.metadata.rootElement = result.outputWrapper.wrapperKey;
+        result.outputSchema.metadata.includeMetadata = result.outputWrapper.includeMetadata || false;
+        
+        // Ensure jsonMappingConfig has the same wrapper settings
+        if (!result.outputSchema.metadata.jsonMappingConfig) {
+          result.outputSchema.metadata.jsonMappingConfig = {};
+        }
+        result.outputSchema.metadata.jsonMappingConfig.outputWrapper = {
+          ...result.outputWrapper
+        };
+        
+        console.log('✅ Output wrapper configuration synchronized');
+      } else {
+        console.log('ℹ️ No output wrapper needed for this configuration');
+      }
+    }
+  
     console.log('✨ Final parsed configuration:', result);
     return result;
   };
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
+
+    // Detect if wrapper is needed before sending to AI
+    const wrapperDetection = detectOutputWrapper(input.trim());
+    
+    if (wrapperDetection.needsWrapper) {
+      console.log(`🎁 Wrapper detection result:`, wrapperDetection);
+    }
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -274,8 +579,16 @@ Generate the configuration changes needed to fulfill this request.`;
     setIsLoading(true);
 
     try {
-      const generatedConfig = await generateConfiguration(userMessage.content);
+      let generatedConfig = await generateConfiguration(userMessage.content);
       
+      // After getting AI response, ensure consistency
+      if (generatedConfig) {
+        generatedConfig = ensureWrapperConsistency(
+          generatedConfig, 
+          wrapperDetection.wrapperKey
+        );
+      }
+
       // Format the changes for display
       const changes = Object.entries(generatedConfig).map(([key, value]) => {
         if (typeof value === 'object' && value !== null) {

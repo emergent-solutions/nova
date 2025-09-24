@@ -132,6 +132,16 @@ interface SourceField {
   sourceName: string;
 }
 
+/**
+ * Generates a unique key for React elements in nested field trees
+ * Prevents duplicate key warnings when the same field name appears at different levels
+ */
+function generateUniqueFieldKey(path: string, index: number, parentPath?: string): string {
+  // Include the full path and index to ensure uniqueness
+  const fullPath = parentPath ? `${parentPath}.${path}` : path;
+  return `field_${fullPath}_${index}`;
+}
+
 export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
   sourceSelection,
   outputTemplate,
@@ -192,14 +202,13 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
     );
   }
 
-  // ============= BUILD SOURCE FIELDS FROM ALL SOURCES =============
   const getAllSourceFields = (): Record<string, SourceField[]> => {
     const fieldsBySource: Record<string, SourceField[]> = {};
     
-    sourceSelection.sources.forEach((source: any) => {
+    sourceSelection.sources.forEach((source: any, sourceIndex: number) => {
       const fields: SourceField[] = [];
       
-      // Add metadata fields for this source
+      // Add metadata fields for this source with unique identifiers
       fields.push(
         {
           path: '_source.id',
@@ -236,7 +245,7 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
       // Extract data fields from sample data
       if (sampleData[source.id]) {
         let dataToAnalyze = sampleData[source.id];
-
+  
         // Navigate to the primary path if specified
         if (source.primaryPath) {
           const parts = source.primaryPath.split('.');
@@ -249,22 +258,34 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
         
         // Extract fields from the data
         const extracted = extractFieldPaths(dataToAnalyze, '', 3);
-        extracted.forEach(field => {
+        
+        // Use a Set to track paths we've already added for this source
+        const addedPaths = new Set<string>();
+        
+        extracted.forEach((field, fieldIndex) => {
           let cleanPath = field.path;
           if (source.primaryPath && Array.isArray(dataToAnalyze) && cleanPath.startsWith('[*].')) {
             cleanPath = cleanPath.substring(4); // Remove '[*].' prefix
           }
-
-          fields.push({
-            path: cleanPath,
-            name: field.name,
-            type: field.type,
-            value: field.value,
-            category: 'data',
-            isMetadata: false,
-            sourceId: source.id,
-            sourceName: source.name
-          });
+          
+          // Create a unique identifier for this field
+          const fieldIdentifier = `${cleanPath}_${fieldIndex}`;
+          
+          // Only add if we haven't seen this exact path for this source
+          if (!addedPaths.has(cleanPath)) {
+            addedPaths.add(cleanPath);
+            
+            fields.push({
+              path: cleanPath,
+              name: field.name,
+              type: field.type,
+              value: field.value,
+              category: 'data',
+              isMetadata: false,
+              sourceId: source.id,
+              sourceName: source.name
+            });
+          }
         });
       }
       
@@ -371,14 +392,17 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
       </div>
       
       <div style={styles.panelContent}>
-        {outputTemplate.fields.map((field: any) => {
+        {outputTemplate.fields.map((field: any, fieldIndex: number) => {
           const targetMappings = getMappingsForTarget(field.path);
           const hasMappings = targetMappings.length > 0;
           const isDragOver = dragOverTarget === field.path;
           
+          // Create unique key for output field
+          const outputFieldKey = `output_${field.path}_${fieldIndex}`;
+          
           return (
             <div
-              key={field.path}
+              key={outputFieldKey}  // Use unique key
               onDragOver={(e) => handleDragOver(e, field.path)}
               onDragLeave={handleDragLeave}
               onDrop={(e) => handleDrop(e, field.path)}
@@ -416,28 +440,33 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
               
               {targetMappings.length > 0 ? (
                 <div style={{ fontSize: 12 }}>
-                  {targetMappings.map((mapping: any) => (
-                    <div key={mapping.id} style={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      gap: 8,
-                      padding: '4px',
-                      backgroundColor: 'rgba(255,255,255,0.8)',
-                      borderRadius: 3,
-                      marginBottom: 4
-                    }}>
-                      <Icon icon="link" size={10} />
-                      <span style={{ flex: 1 }}>
-                        <strong>{mapping.sourceName}:</strong> {mapping.sourcePath}
-                      </span>
-                      <Button
-                        minimal
-                        small
-                        icon="cross"
-                        onClick={() => removeMapping(mapping.id)}
-                      />
-                    </div>
-                  ))}
+                  {targetMappings.map((mapping: any, mappingIndex: number) => {
+                    // Create unique key for each mapping
+                    const mappingKey = `${mapping.id}_${mappingIndex}`;
+                    
+                    return (
+                      <div key={mappingKey} style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: 8,
+                        padding: '4px',
+                        backgroundColor: 'rgba(255,255,255,0.8)',
+                        borderRadius: 3,
+                        marginBottom: 4
+                      }}>
+                        <Icon icon="link" size={10} />
+                        <span style={{ flex: 1 }}>
+                          <strong>{mapping.sourceName}:</strong> {mapping.sourcePath}
+                        </span>
+                        <Button
+                          minimal
+                          small
+                          icon="cross"
+                          onClick={() => removeMapping(mapping.id)}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div style={{ 
@@ -529,9 +558,12 @@ export const FieldMappingCanvas: React.FC<FieldMappingCanvasProps> = ({
       m => m.sourceId === field.sourceId && m.sourcePath === field.path
     );
     
+    // Create a unique key that combines sourceId and path
+    const uniqueKey = `${field.sourceId}_${field.path}_${field.isMetadata ? 'meta' : 'data'}`;
+    
     return (
       <div
-        key={field.path}
+        key={uniqueKey}  // Use the unique key here
         draggable
         onDragStart={() => handleDragStart(field)}
         onDragEnd={handleDragEnd}
