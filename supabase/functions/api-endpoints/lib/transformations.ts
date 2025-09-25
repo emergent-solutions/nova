@@ -205,6 +205,9 @@ export function setValueAtPath(obj: any, path: string, value: any): any {
   if (/^\d+$/.test(lastSegment)) {
     const index = parseInt(lastSegment, 10);
     if (Array.isArray(current)) {
+      while (current.length <= index) {
+        current.push(null);
+      }
       current[index] = value;
     }
   } else {
